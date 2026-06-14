@@ -5,7 +5,7 @@
 ### Local, LAN-direct live video from a eufy WebRTC NVR — no cloud media, no Frigate.
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge&logo=homeassistantcommunitystore&logoColor=white)](https://github.com/hacs/integration)
-[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.11+-41BDF5?style=for-the-badge&logo=home-assistant&logoColor=white)](https://www.home-assistant.io/)
+[![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.11+-41BDF5?style=for-the-badge&logo=homeassistant&logoColor=white)](https://www.home-assistant.io/)
 [![go2rtc](https://img.shields.io/badge/go2rtc-RTSP%20%2F%20WebRTC-success?style=for-the-badge&logo=webrtc&logoColor=white)](https://github.com/AlexxIT/go2rtc)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
 
@@ -151,12 +151,33 @@ streams:
 Reload go2rtc, then **Settings → Devices & Services → Add Integration → Generic Camera** → Stream Source:
 `rtsp://BRIDGE_IP:8554/eufy_garage`. You get low-latency WebRTC live view on dashboards out of the box.
 
-**B. HACS (optional convenience integration):** add this repo to HACS, install **Eufy NVR**, then add the
-integration and enter your bridge's IP — it creates the camera entities for all channels for you. (The bridge
-from step 1 still does the actual streaming; the integration just wires up the entities.)
+**B. HACS (optional convenience integration)** — creates the camera entities for all channels for you. (The
+bridge from step 1 still does the actual streaming; the integration just wires up the entities.)
 
-[![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=HallyAus&repository=Eufy-Home-Assistant&category=integration)
-[![Add the Eufy NVR integration to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=eufy_nvr)
+> Prerequisite: [HACS](https://hacs.xyz/) installed in Home Assistant.
+
+**1. Add this repo as a custom repository in HACS:**
+   - One click — just hit this button (opens HACS on your HA and pre-fills the repo):
+
+     [![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=HallyAus&repository=Eufy-Home-Assistant&category=integration)
+
+   - **Or manually:** Home Assistant → **HACS** → top-right **⋮ menu** → **Custom repositories** →
+     - **Repository:** `https://github.com/HallyAus/Eufy-Home-Assistant`
+     - **Type / Category:** `Integration`
+     - click **Add**.
+
+**2. Install it:** in HACS, search **"Eufy NVR (local)"** → open it → **Download** → **Restart Home Assistant**
+   when prompted.
+
+**3. Add the integration:** **Settings → Devices & Services → + Add Integration →** search **"Eufy NVR"**
+   (or use the button below), then enter:
+   - **Bridge host (IP):** the machine running the bridge from step 1 (e.g. `192.168.1.7`)
+   - **RTSP port:** `8554`
+   - **Stream names:** `eufy_garage,eufy_ch1,eufy_ch2,eufy_ch3` (these match `bridge/go2rtc.yaml`; rename to taste)
+
+   You'll get one camera entity per channel, ready to drop on a dashboard (low-latency WebRTC via go2rtc).
+
+     [![Add the Eufy NVR integration to your Home Assistant instance.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=eufy_nvr)
 
 ---
 
