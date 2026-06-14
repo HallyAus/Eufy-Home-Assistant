@@ -5,17 +5,18 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental / foundation.** Container + engine + auto-discovery + supervise/restart are
-> production-grade. Two convenience pieces are still on the roadmap: (1) headless email/password login
-> (v0.3 still needs a one-time token), and (2) a companion integration to auto-create the camera
-> entities. See the repo roadmap.
+> **Status: experimental.** Container + engine + auto-discovery + supervise/restart are production-grade.
+> **v0.4 adds headless email/password login** — no more one-time token paste. A companion HACS
+> integration, **"Eufy NVR (local)"**, auto-creates the camera entities from the bridge's go2rtc;
+> install it separately from this repo.
 
 ## What it runs
 
-- A Debian-based container (HA `*-base-debian:bookworm`) with python3 + aiortc/av/pycryptodome,
-  nodejs (the libsctp WASM framing oracle), ffmpeg, and a pinned go2rtc.
-- `run.sh` (bashio): builds `auth.json` from your options, auto-discovers cameras, generates
-  `go2rtc.yaml`, then supervises go2rtc with restart-on-crash and capped backoff.
+- A Debian-based container (HA `*-base-debian:bookworm`) with python3 + aiortc/av/pycryptodome/
+  cryptography, nodejs (the libsctp WASM framing oracle), ffmpeg, and a pinned go2rtc.
+- `run.sh` (bashio): logs into the eufy passport (`auth_login.py`) to build `auth.json`,
+  auto-discovers cameras, generates `go2rtc.yaml`, then supervises go2rtc with restart-on-crash and
+  capped backoff.
 
 ## Install
 
@@ -23,29 +24,23 @@ cloud; the video itself is pulled LAN-direct from the NVR.
    `https://github.com/HallyAus/Eufy-Home-Assistant` -> **Add**.
 2. Find and install **Eufy NVR Local (experimental)**. (First build is slow: it compiles/links the
    WebRTC stack and downloads go2rtc.)
-3. **Get a session token (one-time, until v0.4 headless login lands):** on any PC with Node + Chrome,
-   from the repo run:
-   ```
-   cd bridge
-   npm i playwright-core
-   node get_auth.js
-   ```
-   Log into your eufy account in the window that opens and open the NVR live view once. This writes
-   `bridge/auth.json` with `authToken`, `gtoken`, `userId` (your account id), and `stationSn`.
-4. **Configuration tab** of the add-on — paste those four values and set `region`:
-   - `auth_token`  <- `authToken`
-   - `gtoken`      <- `gtoken`
-   - `user_id`     <- `userId`
-   - `station_sn`  <- `stationSn`
-   - `region`      -> `US` or `EU`
-   - `log_level`   -> `info` (raise to `debug` only when troubleshooting)
+3. **Configuration tab** of the add-on — enter your eufy account and region:
+   - `email`     -> your eufy account email
+   - `password`  -> your eufy account password
+   - `region`    -> `US` or `EU`
+   - `log_level` -> `info` (raise to `debug` only when troubleshooting)
+   - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
+   - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
+     captcha (the log prints the `captcha_id`; solve it and set both, then restart).
 
-   Credentials are written to an in-container `auth.json` (chmod 600) and are never printed to the log.
-5. **Start** the add-on and watch the **Log** tab. It discovers your cameras, generates the stream
-   list, and starts go2rtc. Click **Open Web UI** (go2rtc on port 1984) to see/test the streams.
+   On start the add-on logs into the eufy passport, derives your NVR's `station_sn` from the station
+   list, and writes an in-container `auth.json` (chmod 600). Your password is passed only via the
+   environment, scrubbed right after login, and never printed to the log.
+4. **Start** the add-on and watch the **Log** tab. It logs in, discovers your cameras, generates the
+   stream list, and starts go2rtc. Click **Open Web UI** (go2rtc on port 1984) to see/test the streams.
 
-> The NVR allows **one** active live session and one signed-in app session at a time. Avoid running
-> `get_auth.js` or the eufy app at the same moment the add-on is discovering/streaming.
+> The NVR allows **one** active live session, and a passport login bumps the signed-in app session.
+> Avoid logging into the eufy mobile app at the same moment the add-on is starting/discovering/streaming.
 
 ## Use the cameras in Home Assistant
 
@@ -55,10 +50,10 @@ On the HA host the add-on serves:
 - go2rtc UI / API: `http://<ha-ip>:1984/`
 
 Stream names are slugified from your camera names (e.g. "Garage" -> `eufy_garage`); the exact list is
-printed in the add-on log and shown in the go2rtc UI. Until the companion integration lands, surface
-them with either:
+printed in the add-on log and shown in the go2rtc UI. To surface them as camera entities, either:
 
-- **Generic Camera** integration -> *Stream Source* `rtsp://127.0.0.1:8554/eufy_garage` (one per camera), or
+- install the companion **"Eufy NVR (local)"** HACS integration (auto-creates one camera per stream), or
+- use the **Generic Camera** integration -> *Stream Source* `rtsp://127.0.0.1:8554/eufy_garage`, or
 - add them to HA's own `/config/go2rtc.yaml` and reference from a `camera:` / WebRTC card.
 
 Streams are **on-demand**: the engine only connects to the NVR while something is actually pulling a
@@ -85,10 +80,12 @@ HA), so these ports are opened directly on the host.
 
 ## Troubleshooting
 
-- **"No auth_token set"** — fill in the Configuration tab (step 3–4).
-- **"Discovery failed" / streams never start** — almost always an **expired session token**. Re-run
-  `get_auth.js` and re-paste the four values. Also confirm `region` matches your account (US/EU) and
-  `station_sn` is your NVR's serial.
+- **"Set email and password"** — fill in the Configuration tab (step 3).
+- **"Headless login failed"** — check email / password / region. If the log shows a **CAPTCHA**, set
+  `captcha_id` + `captcha_answer` from the log and restart. A wrong password several times in a row can
+  trigger a temporary lockout (retry after ~24h).
+- **"Discovery failed" / streams never start** — confirm `region` matches your account (US/EU). If
+  auto-discovery can't find the NVR, set `station_sn` to your NVR's serial explicitly.
 - **`libsctp_*.wasm is missing` warning** — eufy bumped the libsctp version; the build's
   `fetch_deps.js` couldn't grab the matching worker files. Update the versions in
   `bridge/fetch_deps.js` + `bridge/sctp_oracle.js` and rebuild.

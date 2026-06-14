@@ -99,7 +99,8 @@ RUN set -eux; \
     /opt/eufy/bridge/bin/go2rtc -version || true
 
 # Verify the heavy native imports actually load at build time (fail fast on a bad wheel/link).
-RUN python3 -c "import av, aiortc, Crypto; from aiortc import RTCPeerConnection; print('av', av.__version__, 'aiortc OK')"
+# `cryptography` is what eufy_cloud.py (ECDH/AES login + station_list) needs; assert it too.
+RUN python3 -c "import av, aiortc, Crypto, cryptography; from aiortc import RTCPeerConnection; print('av', av.__version__, 'aiortc', aiortc.__version__, 'cryptography', cryptography.__version__)"
 
 # ---------------------------------------------------------------------------
 # Add-on entrypoint

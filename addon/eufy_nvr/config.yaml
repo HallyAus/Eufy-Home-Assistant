@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.3.0"
+version: "0.4.0"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
@@ -41,37 +41,25 @@ ports_description:
   8555/tcp: WebRTC (TCP candidate)
   8555/udp: WebRTC (UDP candidate)
 
-# --- Auth (v0.3) ---------------------------------------------------------------
-# Still a one-time session token: run bridge/get_auth.js once on any PC, paste the values here.
-# The token only signs the eufy cloud *signaling*; the video itself is pulled LAN-direct.
-# Re-paste if streams stop starting and the log shows ws/sign returning non-200 (token expired).
+# --- Auth (v0.4): headless email/password login (no token paste) ---------------
+# run.sh runs auth_login.py, which logs into the eufy passport (reversed ECDH+AES login --
+# the body's password is ECDH/AES-256-CBC encrypted and the whole request rides the openapi
+# ECDH share-key wrapper; see bridge/eufy_cloud.py), derives the NVR station_sn from the
+# station list, and writes auth.json. Credentials live only in the add-on options + an
+# in-container auth.json (chmod 600) and are never logged.
+#   station_sn     -- optional: set if auto-discovery can't find the NVR serial.
+#   captcha_id / captcha_answer -- optional: only if a login is challenged with a graphic
+#                     captcha (the log prints the captcha_id; solve it and set both, restart).
 options:
-  auth_token: ""
-  gtoken: ""
-  user_id: ""
-  station_sn: ""
+  email: ""
+  password: ""
   region: "US"
   log_level: "info"
 schema:
-  auth_token: str
-  gtoken: str
-  user_id: str
-  station_sn: str
+  email: email
+  password: password
   region: list(US|EU)?
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
-
-# --- Roadmap v0.4: headless email/password login (no token paste) --------------
-# When the pure-Python eufy passport login lands, the block above is replaced by the two fields
-# below (email + password), and run.sh derives auth_token/gtoken/user_id/station_sn itself.
-# Kept here, commented, so the schema/UX is ready to switch over:
-#
-# options:
-#   email: ""
-#   password: ""
-#   region: "US"
-#   log_level: "info"
-# schema:
-#   email: email
-#   password: password
-#   region: list(US|EU)?
-#   log_level: list(trace|debug|info|notice|warning|error|fatal)?
+  station_sn: str?
+  captcha_id: str?
+  captcha_answer: str?

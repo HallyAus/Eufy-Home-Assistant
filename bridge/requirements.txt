@@ -3,3 +3,4 @@ av
 websockets>=12
 aiohttp
 pycryptodome
+cryptography

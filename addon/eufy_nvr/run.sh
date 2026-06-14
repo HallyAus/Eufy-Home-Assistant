@@ -23,38 +23,38 @@ LOG_LEVEL="$(bashio::config 'log_level' 'info')"
 export EUFY_LOG_LEVEL="${LOG_LEVEL}"
 
 # -----------------------------------------------------------------------------
-# 1) Auth: require a token, then write auth.json the engine reads.
-#    Credentials live only in this in-container file (chmod 600); never logged.
+# 1) Auth: headless email/password login -> auth.json (the engine reads it).
+#    auth_login.py logs into the eufy passport, derives the NVR station_sn from the
+#    station list, and writes auth.json. Credentials are passed via env (never argv),
+#    scrubbed afterwards, and never logged. The file is chmod 600.
 # -----------------------------------------------------------------------------
-if ! bashio::config.has_value 'auth_token'; then
-    bashio::log.fatal "No 'auth_token' set in the add-on configuration."
-    bashio::log.fatal "Run bridge/get_auth.js once on any PC (logs into the eufy web portal),"
-    bashio::log.fatal "then paste authToken / gtoken / userId / stationSn into this add-on's options."
-    bashio::log.fatal "(Headless email/password login is on the v0.4 roadmap.)"
+if ! bashio::config.has_value 'email' || ! bashio::config.has_value 'password'; then
+    bashio::log.fatal "Set 'email' and 'password' (your eufy account) in the add-on configuration."
     # Exit non-zero but slowly, so the Supervisor doesn't crash-loop the UI.
     sleep 15
     exit 1
 fi
 
-AUTH_TOKEN="$(bashio::config 'auth_token')"
-GTOKEN="$(bashio::config 'gtoken')"
-USER_ID="$(bashio::config 'user_id')"
-STATION_SN="$(bashio::config 'station_sn')"
-REGION="$(bashio::config 'region' 'US')"
+export EUFY_EMAIL="$(bashio::config 'email')"
+export EUFY_PASSWORD="$(bashio::config 'password')"
+export EUFY_REGION="$(bashio::config 'region' 'US')"
+export EUFY_AUTH="${BRIDGE_DIR}/auth.json"
+if bashio::config.has_value 'station_sn'; then export EUFY_STATION_SN="$(bashio::config 'station_sn')"; fi
+if bashio::config.has_value 'captcha_id'; then export EUFY_CAPTCHA_ID="$(bashio::config 'captcha_id')"; fi
+if bashio::config.has_value 'captcha_answer'; then export EUFY_CAPTCHA_ANSWER="$(bashio::config 'captcha_answer')"; fi
 
 umask 077
-cat > "${BRIDGE_DIR}/auth.json" <<JSON
-{
-  "authToken": "${AUTH_TOKEN}",
-  "gtoken": "${GTOKEN}",
-  "userId": "${USER_ID}",
-  "stationSn": "${STATION_SN}",
-  "webCountry": "${REGION}",
-  "appName": "eufy_mega"
-}
-JSON
-chmod 600 "${BRIDGE_DIR}/auth.json"
-bashio::log.info "Wrote auth.json (station ${STATION_SN}, region ${REGION}). Token kept out of logs."
+if ! python3 auth_login.py; then
+    bashio::log.fatal "Headless login failed. Verify email / password / region. If the log above shows"
+    bashio::log.fatal "a CAPTCHA, set captcha_id + captcha_answer in the add-on options and restart."
+    rm -f "${BRIDGE_DIR}/auth.json"
+    unset EUFY_PASSWORD
+    sleep 15
+    exit 1
+fi
+unset EUFY_PASSWORD
+chmod 600 "${BRIDGE_DIR}/auth.json" 2>/dev/null || true
+bashio::log.info "Logged in; wrote auth.json (region $(bashio::config 'region' 'US')). Credentials kept out of logs."
 
 # Sanity-check the worker WASM the SCTP oracle needs (fetched at build time).
 if [ ! -f "${BRIDGE_DIR}/worker/libsctp_0_0_1.wasm" ]; then

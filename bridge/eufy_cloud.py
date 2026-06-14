@@ -148,6 +148,7 @@ EXCHANGE_BOOTSTRAP_KEY_QA = "118c02b71e211049304bd70a0c971d44"
 # ("2500a7d5617812f9d52515b2c8f20a3d") against fa("openapi")+"/openapi/oauth/key/
 # exchange". We default to the v3 "security" flow that the station_list wrapper uses.
 EXCHANGE_BOOTSTRAP_KEY_OPENAPI = "2500a7d5617812f9d52515b2c8f20a3d"
+EXCHANGE_BOOTSTRAP_KEY_OPENAPI_QA = "208c02b71e211049304bd70a0c971d44"
 
 KEY_EXCHANGE_PATH_V3 = "/v3/openapi/oauth/key/exchange"
 KEY_EXCHANGE_PATH_V1 = "/openapi/oauth/key/exchange"
@@ -338,25 +339,32 @@ async def _http_post(url: str, *, data: Any = None, json_body: Any = None,
 # ====================================================================================
 async def ecdh_handshake(token: str, *, region: str = "us-pr",
                          web_country: str = "", qa: bool = False,
+                         exchange: str = "security",
                          timeout: int = DEFAULT_TIMEOUT) -> KeyExchange:
     """
-    Perform the ECDH key exchange against the v3 "security" service and return a
-    KeyExchange you can pass to encrypted_post().
+    Perform an ECDH key exchange and return a KeyExchange for encrypted_post().
 
-    Mirrors bundle bn() (offset ~84127):
-        bootstrap = "118c12c81e211149304bd70a0c071d01"
-        [priv, pub] = Ya()
-        encClientPub = tn(pub, bootstrap)                 # AES-CBC encrypt pubkey
-        {randomField, headers} = on(pub, encClientPub)    # sign with bootstrap key
-        resp = POST fa("security")+"/v3/openapi/oauth/key/exchange"
-                    body = { client_public_key: encClientPub }
-        serverPub = an(resp.data.data.server_public_key, bootstrap)  # decrypt
-        return Xa(randomField.keyindent, priv, serverPub)
+    There are TWO independent exchanges in the bundle, each feeding a DIFFERENT wrapper
+    (the share keys are NOT interchangeable -- using the wrong one yields the gateway's
+    "get identity error"):
 
-    `token` (auth_token) is attached as X-Auth-Token; the exchange itself is keyed on
-    the static bootstrap key, not the share key.
+      exchange="security"  (bn(), offset ~84283): bootstrap 118c12c8..., POST
+          fa("security")+"/v3/openapi/oauth/key/exchange". Key read by wn() ->
+          station_list / house_list.   [verified live]
+      exchange="openapi"   (fn(), offset ~17613): bootstrap 2500a7d5..., POST
+          fa("openapi")+"/openapi/oauth/key/exchange". Key read by hn() -> vn() ->
+          ALL /passport/* calls (login, generate/captcha, ...).
+
+    Both share the same on()/Ya()/tn()/an() primitives; only the bootstrap key + endpoint
+    differ. `token` (auth_token) is attached as X-Auth-Token when present; the exchange
+    itself is keyed on the static bootstrap key, not the share key.
     """
-    bootstrap = EXCHANGE_BOOTSTRAP_KEY_QA if qa else EXCHANGE_BOOTSTRAP_KEY
+    if exchange == "openapi":
+        bootstrap = EXCHANGE_BOOTSTRAP_KEY_OPENAPI_QA if qa else EXCHANGE_BOOTSTRAP_KEY_OPENAPI
+        service, path = "openapi", KEY_EXCHANGE_PATH_V1
+    else:
+        bootstrap = EXCHANGE_BOOTSTRAP_KEY_QA if qa else EXCHANGE_BOOTSTRAP_KEY
+        service, path = "security", KEY_EXCHANGE_PATH_V3
     priv_hex, pub_hex = gen_keypair()
     enc_client_pub = aes_encrypt(pub_hex, bootstrap)
 
@@ -369,7 +377,7 @@ async def ecdh_handshake(token: str, *, region: str = "us-pr",
     if token:
         headers["X-Auth-Token"] = token
 
-    url = base_url("security", region) + KEY_EXCHANGE_PATH_V3
+    url = base_url(service, region) + path
     resp = await _http_post(url, json_body={"client_public_key": enc_client_pub},
                             headers=headers, timeout=timeout)
     body = resp.get("json") or {}
@@ -387,7 +395,10 @@ async def ecdh_handshake(token: str, *, region: str = "us-pr",
 async def encrypted_post(path: str, data: Any, token: str, *,
                          key_obj: Optional[KeyExchange] = None,
                          gtoken: str = "", region: str = "us-pr",
-                         web_country: str = "", timeout: int = DEFAULT_TIMEOUT,
+                         web_country: str = "", service: str = "security",
+                         extra_headers: Optional[Dict[str, str]] = None,
+                         return_envelope: bool = False,
+                         timeout: int = DEFAULT_TIMEOUT,
                          verify_signature: bool = True) -> Any:
     """
     Make an encrypted POST to the v3 "security" service and return the decrypted,
@@ -421,12 +432,19 @@ async def encrypted_post(path: str, data: Any, token: str, *,
     headers["X-Key-Ident"] = key_obj.key_indent
     headers["App-Name"] = APP_NAME
     headers["X-Auth-Token"] = token or ""
+    # vn() spreads the caller's headers (e.headers) over the signed base BEFORE forcing
+    # GToken + Content-Type. For passport calls e.headers carries the Ba()/Openudid set.
+    if extra_headers:
+        headers.update(extra_headers)
     headers["GToken"] = gtoken or ""
-    # wn overrides these two after spreading the base headers:
+    # wn/vn override these after spreading the base headers:
     headers["Content-Type"] = "text/plain"
     headers["Model-Type"] = "WEB"
 
-    url = base_url("security", region) + path
+    # vn() uses ONE global share key for ALL services and routes only the baseURL by
+    # domainKey (fa(service)). The share key is established once via the security
+    # key/exchange (ecdh_handshake) and reused for passport/openapi/etc.
+    url = base_url(service, region) + path
     resp = await _http_post(url, data=(enc_body if body_str else None),
                             headers=headers, timeout=timeout)
     if resp["status"] != 200:
@@ -446,6 +464,18 @@ async def encrypted_post(path: str, data: Any, token: str, *,
             pass
 
     enc_payload = outer.get("data")
+    if return_envelope:
+        # Full picture: outer {code,msg} PLUS the decrypted inner data (callers like
+        # login() need the envelope code AND the payload).
+        decrypted: Any = None
+        if enc_payload:
+            try:
+                decrypted = json.loads(aes_decrypt(enc_payload, key_obj.share_key))
+            except Exception:  # noqa: BLE001
+                decrypted = aes_decrypt(enc_payload, key_obj.share_key)
+        return {"code": outer.get("code"), "msg": outer.get("msg"),
+                "data": decrypted, "raw": outer}
+
     if not enc_payload:
         return outer  # e.g. an error envelope { code, msg }
     decrypted = aes_decrypt(enc_payload, key_obj.share_key)
@@ -580,29 +610,46 @@ def _online(status: Any) -> bool:
 
 
 # ====================================================================================
-# login(email, password, region)  --  INFERRED (passport bundle is NOT in webrtc_bundle.js)
+# login(email, password, region)  --  CONFIRMED against the live login page bundle
+# captures/login_js/index-bnAfdtPI.js (de-minified: ...beauty.js). No longer inferred.
 # ====================================================================================
-# Implemented per the documented eufy passport flow and the public
-# bropat/eufy-security-client approach. EVERY field name / encryption detail here is
-# INFERRED and must be confirmed against ONE live login. Do not assume it is correct.
-#
-# Known facts about the passport flow (from public clients, NOT this bundle):
-#   * Host:  app-passport-<region>-pr.eufy.com   (region in {us, eu, ie})
-#   * The client first GETs/POSTs a public key, RSA/ECDH-encrypts the password, then
-#     POSTs /v1/passport/login (older clients) or /passport/login (newer) with:
-#       { ab: <country code>, client_secret_info:{public_key:...}, enc:0,
-#         email:<email>, password:<encrypted>, time_zone:<ms offset>,
-#         transaction:<ms timestamp> }
-#   * Response (success): { code:0, data:{ auth_token, token_expires_at, user_id,
-#                            domain, ... } }, with `domain` telling you which regional
-#                          API host to use afterwards (the "region_domain").
-#   * gtoken: returned separately / derived; some flows return it in the login data as
-#             "gtoken" or require a follow-up call. Marked INFERRED.
-#
-# Because the LOGIN bundle was not captured, the password encryption below is left as a
-# clearly-marked stub with two candidate strategies. Pick/confirm with one live test.
+# Reversed verbatim from the passport login bundle. The earlier RSA stub was WRONG --
+# the password is ECDH(P-256)+AES-256-CBC encrypted, not RSA. Key facts:
+#   * Host/path:  fa("passport", region) = https://app-passport-<r>-pr.eufy.com, then
+#                 "/passport/login"   (NOT "/v1/passport/login").
+#   * Password encryption  (bundle te() + se()):
+#       1. server EC pubkey = S()?.server_secret_info?.public_key, else the hardcoded
+#          fallback uncompressed P-256 point LOGIN_SERVER_PUBKEY_FALLBACK below. A fresh
+#          headless login has nothing cached -> the fallback is the value to use.
+#       2. generate an ephemeral client P-256 keypair (ee()).
+#       3. WebCrypto deriveKey(ECDH(clientPriv, serverPub) -> AES-CBC length:256) ==
+#          the raw 32-byte ECDH shared secret (the P-256 X coordinate) used directly as
+#          the AES-256 key (WebCrypto takes the first `length` bits, no extra KDF/hash).
+#       4. iv = FIRST 16 BYTES of that 32-byte key  (se(): exportKey(key).slice(0,16)).
+#       5. ciphertext = AES-256-CBC + PKCS7 over the UTF-8 password bytes.
+#       6. password field = base64(ciphertext)  -- NO IV prepended (server re-derives).
+#      Verified WITHOUT a live login by a differential test against Node's WebCrypto
+#      reference: scripts/login_ref.js + scripts/login_verify.py (byte-identical output).
+#   * Login body (bundle ca()):
+#       { email, password:<enc>, enc:0, ab:<country>, login_id:"",
+#         client_secret_info:{ public_key:<client pub hex "04"||X||Y> },
+#         captcha_id:"", answer:"" }
+#   * Headers = Ba()/K() base set + { "X-Auth-Token":"", Openudid:SHA256(ua+"_"+email) }
+#     + App-Name:"eufy_mega" (the request wrapper injects App-Name/Model-Type).
+#   * Response: code 0 -> data{ auth_token, user_id, domain, server_secret_info?, ... }.
+#     code 10019 / 100056 -> graphic captcha required (login() auto-fetches it via
+#     get_captcha() and tells you to re-run with captcha_id+answer); 26052 fa_info.step
+#     -> 2FA; 100028 / 100041 -> login-limit reached (retry after ~24h).
 
-PASSPORT_REGION_MAP = {  # high-level region -> passport subdomain region (INFERRED)
+# Hardcoded fallback server EC public key (uncompressed P-256 point "04"||X||Y), verbatim
+# from the login bundle te(). The passport server holds the matching private key.
+LOGIN_SERVER_PUBKEY_FALLBACK = "04c5c00c4f8d1197cc7c3167c52bf7acb054d722f0ef08dcd7e0883236e0d72a3868d9750cb47fa4619248f3d83f0f662671dadc6e2d31c2f41db0161651c7c076"
+
+# Openudid = SHA256(userAgent + "_" + email).hex (bundle: N.SHA256(`${ua}_${email}`)). The
+# web app uses navigator.userAgent; any stable UA works for a fresh login.
+WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
+PASSPORT_REGION_MAP = {  # high-level region -> passport subdomain region
     "us-pr": "us", "eu-pr": "eu", "ie-pr": "ie",
     "us": "us", "eu": "eu", "ie": "ie",
 }
@@ -614,103 +661,206 @@ def _passport_base(region: str) -> str:
 
 
 async def login(email: str, password: str, region: str = "us-pr", *,
-                country: str = "US", timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+                country: str = "US", language: str = "en-US",
+                captcha_id: str = "", answer: str = "",
+                server_pub_hex: Optional[str] = None,
+                user_agent: Optional[str] = None,
+                key_obj: Optional[KeyExchange] = None,
+                timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
     """
-    INFERRED passport login. Returns:
+    Headless passport login, reversed from captures/login_js/index-bnAfdtPI.js. Returns:
         { auth_token, gtoken, user_id, region_domain }
 
-    !!! UNCONFIRMED !!! The passport login page was NOT in webrtc_bundle.js. This
-    follows the documented eufy/bropat flow but the request shape and especially the
-    password-encryption step MUST be validated with a single live login before relying
-    on it. The function is written so it can be run unchanged once the encryption step
-    is confirmed; it raises a clear error if the response shape differs.
+    TRANSPORT: /passport/login is NOT a plaintext POST. In the bundle P()=vn() is the
+    encrypted v3 wrapper -- the JSON body (which already contains the ECDH-encrypted
+    password) is AES-CBC encrypted under the session share key and HMAC-signed, sent as
+    text/plain to the passport host. So login() (1) does the ECDH key/exchange to get the
+    share key, then (2) rides encrypted_post(service="passport"). This is the SAME wrapper
+    station_list uses (verified live); only the password's own ECDH layer + the body are
+    login-specific.
 
-    Flow (INFERRED):
-      1. POST {passport}/v1/passport/server_secret_info  (or .../client_secret_info)
-         -> server returns an RSA public key + a public_key id.    [needs live confirm]
-      2. Encrypt the password (RSA-PKCS1 or ECDH-AES -- candidate code below).
-      3. POST {passport}/v1/passport/login with the encrypted password.
-      4. Read auth_token / user_id / domain (= region_domain) / gtoken from data.
+    The password is ECDH(P-256)+AES-256-CBC encrypted (see encrypt_password). Pass
+    ``captcha_id``+``answer`` to satisfy a graphic captcha -- if the server demands one,
+    login() auto-fetches the captcha image and tells you the id/path so you can re-run.
     """
-    base = _passport_base(region)
+    ua = user_agent or WEB_USER_AGENT
+    srv_pub = server_pub_hex or LOGIN_SERVER_PUBKEY_FALLBACK
 
-    # ---- Step 1: fetch server public key (INFERRED endpoint/shape) ----------------
-    pub_resp = await _http_post(
-        base + "/v1/passport/server_secret_info",
-        json_body={"invitation_code": "", "transaction": str(int(time.time() * 1000))},
-        headers={"Content-Type": "application/json", "App-Name": APP_NAME},
-        timeout=timeout,
-    )
-    pub_body = pub_resp.get("json") or {}
-    server_secret = (pub_body.get("data") or {})
-    rsa_pubkey_pem = server_secret.get("public_key") or server_secret.get("server_secret_info")
+    # 1) Establish the global ECDH share key (the web app does this at bootstrap via the
+    #    security key/exchange; /passport/login then rides the same encrypted wrapper).
+    if key_obj is None:
+        key_obj = await ecdh_handshake("", region=region, web_country=country,
+                                       exchange="openapi", timeout=timeout)
 
-    # ---- Step 2: encrypt password (INFERRED -- TWO candidate strategies) -----------
-    # Strategy A (most common in eufy clients): RSA-PKCS1v15 encrypt the raw password
-    # with the server's public key, then base64. Uncomment once the key format is known.
-    enc_password = password  # PLACEHOLDER: send plaintext only if no key was returned.
-    if rsa_pubkey_pem:
-        try:
-            enc_password = _rsa_encrypt_password(password, rsa_pubkey_pem)
-        except Exception as exc:  # noqa: BLE001
-            raise EufyCloudError(
-                "login(): password RSA encryption failed -- the public-key format is "
-                f"INFERRED and needs live confirmation: {exc}"
-            ) from exc
+    # 2) ECDH-encrypt the password against the login server pubkey (bundle te()+se()).
+    client_priv, client_pub_hex = _login_keypair()
+    enc_password = encrypt_password(password, srv_pub, client_priv)
 
-    # ---- Step 3: POST login (INFERRED body) ---------------------------------------
-    now_ms = int(time.time() * 1000)
+    # 3) POST the login body (bundle ca()) THROUGH the encrypted wrapper (domainKey passport).
     login_body = {
-        "ab": country,
-        "client_secret_info": {"public_key": rsa_pubkey_pem or ""},
-        "enc": 0,
         "email": email,
         "password": enc_password,
-        "time_zone": -now_ms % 1,  # placeholder offset; real client sends tz in ms
-        "transaction": str(now_ms),
+        "enc": 0,
+        "ab": country,
+        "login_id": "",
+        "client_secret_info": {"public_key": client_pub_hex},
+        "captcha_id": captcha_id,
+        "answer": answer,
     }
-    resp = await _http_post(
-        base + "/v1/passport/login",
-        json_body=login_body,
-        headers={"Content-Type": "application/json", "App-Name": APP_NAME,
-                 "Country": country},
-        timeout=timeout,
-    )
-    body = resp.get("json") or {}
-    data = body.get("data") or {}
-    auth_token = data.get("auth_token") or data.get("token")
-    if not auth_token:
+    env = await encrypted_post(
+        "/passport/login", login_body, "", key_obj=key_obj, gtoken="",
+        region=region, web_country=country, service="passport",
+        extra_headers=_passport_headers(email, country, language, ua),
+        return_envelope=True, verify_signature=False, timeout=timeout)
+    code = env.get("code")
+    data = env.get("data") if isinstance(env.get("data"), dict) else {}
+
+    # ---- graphic captcha required (10019 = need captcha, 100056 = wrong/again) --------
+    if (code in (10019, 100056) or bool(data.get("captcha_id"))) and not answer:
+        hint = ""
+        try:
+            cap = await get_captcha(region=region, language=language,
+                                    user_agent=ua, key_obj=key_obj, timeout=timeout)
+            saved = _save_captcha_image(cap.get("item", ""))
+            hint = (f" Fetched captcha_id={cap.get('captcha_id')!r}"
+                    + (f", image saved to {saved}" if saved else "")
+                    + "; solve it then call login(..., captcha_id=<id>, answer=<text>).")
+        except Exception as exc:  # noqa: BLE001
+            hint = f" (could not auto-fetch captcha: {exc})"
+        raise EufyCloudError(f"login(): CAPTCHA required (code={code}).{hint}")
+
+    # ---- 2FA / rate-limit / generic failures -----------------------------------------
+    if (data.get("fa_info") or {}).get("step") == 26052:
         raise EufyCloudError(
-            "login(): no auth_token in response -- this flow is INFERRED and the "
-            f"request shape likely needs adjustment. status={resp['status']} "
-            f"code={body.get('code')} msg={body.get('msg')} body={resp['text'][:300]}"
-        )
+            "login(): two-factor authentication required (fa_info.step=26052) -- this "
+            "account needs a 2FA code; headless 2FA is not implemented.")
+    if code in (100028, 100041):
+        raise EufyCloudError(
+            f"login(): login limit reached (code={code}) -- retry after ~24h.")
+
+    auth_token = data.get("auth_token") or data.get("token")
+    if code not in (0, None) or not auth_token:
+        raise EufyCloudError(
+            f"login(): failed. code={code} msg={env.get('msg')!r} "
+            f"data_keys={sorted(data) if isinstance(data, dict) else type(data).__name__}")
+
+    user_id = data.get("user_id") or data.get("userId") or ""
+    gtoken = data.get("gtoken") or data.get("g_token") or ""
+    if not gtoken and user_id:
+        # GToken is NOT returned by login -- the web app computes it client-side as
+        # MD5(user_id) hex and stores it (bundle: setItem(ja, C.MD5(user_id).toString())).
+        gtoken = hashlib.md5(user_id.encode("utf-8")).hexdigest()
     return {
         "auth_token": auth_token,
-        "gtoken": data.get("gtoken") or data.get("g_token") or "",
-        "user_id": data.get("user_id") or data.get("userId") or "",
-        # `domain` tells you which regional API host to talk to afterwards.
+        "gtoken": gtoken,
+        "user_id": user_id,
+        # `domain` is the regional API host to use afterwards (the region_domain).
         "region_domain": data.get("domain") or data.get("region_domain") or "",
     }
 
 
-def _rsa_encrypt_password(password: str, public_key_pem: str) -> str:
+def _login_keypair() -> Tuple[ec.EllipticCurvePrivateKey, str]:
     """
-    INFERRED helper: RSA-PKCS1v15 encrypt the password with a PEM/base64 public key,
-    return base64. Tries PEM first, then bare-base64 DER (SPKI). Confirm format live.
+    ee() -- ephemeral client P-256 keypair for the login ECDH. Returns
+    (private_key_obj, public_hex) where public_hex is the uncompressed point
+    "04"||X||Y (matching WebCrypto exportKey("raw") hex), sent as client_secret_info.
     """
-    from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
-    from cryptography.hazmat.primitives.serialization import load_pem_public_key, load_der_public_key
+    priv = ec.generate_private_key(ec.SECP256R1(), _BACKEND)
+    nums = priv.public_key().public_numbers()
+    pub_hex = "04" + format(nums.x, "064x") + format(nums.y, "064x")
+    return priv, pub_hex
 
-    key_bytes = public_key_pem.encode() if "BEGIN" in public_key_pem else None
-    pub = None
-    if key_bytes is not None:
-        pub = load_pem_public_key(key_bytes, backend=_BACKEND)
-    else:
-        der = base64.b64decode(public_key_pem)
-        pub = load_der_public_key(der, backend=_BACKEND)
-    ct = pub.encrypt(password.encode("utf-8"), asym_padding.PKCS1v15())
+
+def encrypt_password(password: str, server_pub_hex: str,
+                     client_priv: ec.EllipticCurvePrivateKey) -> str:
+    """
+    Reproduce the login bundle's te()+se() password encryption exactly:
+
+      shared = ECDH(client_priv, server_pub)  -> 32-byte P-256 X coordinate.
+      key    = shared (all 32 bytes)          -> AES-256 key (WebCrypto deriveKey
+               AES-CBC length:256 uses the raw shared secret directly, no extra KDF).
+      iv     = shared[:16]                     -> se(): exportKey(key).slice(0,16).
+      out    = base64( AES-256-CBC + PKCS7 ( password_utf8 ) )   -- no IV prepended.
+
+    Verified byte-identical to Node WebCrypto in scripts/login_verify.py.
+    """
+    server_pub = ec.EllipticCurvePublicKey.from_encoded_point(
+        ec.SECP256R1(), bytes.fromhex(server_pub_hex))
+    shared = client_priv.exchange(ec.ECDH(), server_pub)
+    if len(shared) < 32:
+        shared = shared.rjust(32, b"\x00")
+    key, iv = shared[:32], shared[:16]
+    padder = sym_padding.PKCS7(128).padder()
+    padded = padder.update(password.encode("utf-8")) + padder.finalize()
+    enc = Cipher(algorithms.AES(key), modes.CBC(iv), backend=_BACKEND).encryptor()
+    ct = enc.update(padded) + enc.finalize()
     return base64.b64encode(ct).decode("ascii")
+
+
+def _openudid(email: str, user_agent: str) -> str:
+    """Openudid header = SHA256(userAgent + "_" + email) hex (bundle: N.SHA256(...))."""
+    return hashlib.sha256(f"{user_agent}_{email}".encode("utf-8")).hexdigest()
+
+
+def _passport_headers(email: str, country: str, language: str,
+                      user_agent: str) -> Dict[str, str]:
+    """
+    Ba()/K() base headers + the login overrides (X-Auth-Token:"", Openudid). App-Name and
+    Model-Type are injected by the web app's request wrapper; we set them explicitly.
+    """
+    return {
+        "Content-Type": "application/json",
+        "User-Agent": user_agent,
+        "App-Name": APP_NAME,
+        "Os_type": "web", "Os-type": "web",
+        "Os_version": user_agent, "Os-version": user_agent,
+        "Phone_model": "Win32",
+        "Model-type": "WEB", "Model_type": "WEB", "Model-Type": "WEB",
+        "Country": country, "Language": language, "Timezone": "",
+        "X-Auth-Token": "",
+        "Openudid": _openudid(email, user_agent),
+    }
+
+
+async def get_captcha(*, region: str = "us-pr", language: str = "en-US",
+                      user_agent: Optional[str] = None,
+                      key_obj: Optional[KeyExchange] = None,
+                      timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+    """
+    getCaptcha() -- POST /passport/generate/captcha through the encrypted v3 wrapper
+    (P()=vn, domainKey "passport"; the browser sends no request body). Returns the
+    response's ``data`` dict, typically { captcha_id, item } where ``item`` is the captcha
+    image (data-URL/base64). Needs no credentials, so it doubles as a transport smoke-test
+    for the exact handshake + passport-encrypted-POST path login() relies on.
+    """
+    ua = user_agent or WEB_USER_AGENT
+    if key_obj is None:
+        key_obj = await ecdh_handshake("", region=region, web_country="",
+                                       exchange="openapi", timeout=timeout)
+    env = await encrypted_post(
+        "/passport/generate/captcha", "", "", key_obj=key_obj,
+        region=region, web_country="", service="passport",
+        extra_headers=_passport_headers("", "", language, ua),
+        return_envelope=True, verify_signature=False, timeout=timeout)
+    data = env.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _save_captcha_image(item: str) -> str:
+    """Best-effort: decode a captcha ``item`` (data-URL or bare base64) to a PNG. Returns
+    the written path, or "" on failure. Never raises."""
+    if not item:
+        return ""
+    try:
+        b64 = item.split(",", 1)[1] if item.startswith("data:") else item
+        raw = base64.b64decode(b64)
+        out = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           "captures", "login_captcha.png")
+        with open(out, "wb") as fh:
+            fh.write(raw)
+        return out
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 # ====================================================================================
@@ -724,7 +874,8 @@ __all__ = [
     "aes_encrypt", "aes_decrypt", "KeyExchange", "RandomField",
     "ecdh_handshake", "encrypted_post",
     "station_list", "house_list", "device_list", "parse_stations",
-    "login", "EufyCloudError",
+    "login", "encrypt_password", "get_captcha", "LOGIN_SERVER_PUBKEY_FALLBACK",
+    "EufyCloudError",
 ]
 
 
