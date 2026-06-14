@@ -201,16 +201,21 @@ The bridge emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**Working today:** LAN-direct connect, `startStream`, libsctp reassembly, H.265 extraction, sustained ~18–25 fps
-1080p, served as RTSP via go2rtc. Channels 0–3.
+**Working today (v0.1.x):** LAN-direct connect, `startStream`, libsctp reassembly, H.265 extraction, sustained
+~18–25 fps 1080p, served as RTSP via go2rtc, with **auto-discovery** of the NVR + cameras. Channels 0–3.
 
-**Roadmap:**
-- [ ] Replace the browser-based auth (`get_auth.js`) with a pure-Python eufy login (email/password → token), so the
-      bridge is fully headless.
-- [ ] Audio (`1301`) and two-way talk.
-- [ ] Package the bridge as a **Home Assistant add-on** (Docker) so it can run on the HA host itself (no separate
-      machine) — the cleanest end-state for HAOS users.
-- [ ] Auto-reconnect/keep-alive hardening; per-camera substream/quality selection (`streamtype`).
+**The production goal** is a one-stop **Home Assistant add-on** (foundation in [`addon/`](addon/eufy_nvr)) that runs
+the whole engine on your HA host — install the add-on, enter your eufy login, cameras auto-appear. Three pieces get
+us there:
+- [x] **Engine** — WebRTC → H.265 → RTSP/go2rtc (done, proven).
+- [x] **Auto-discovery** — NVR IP + cameras + channels via cmd 9100 (done).
+- [~] **HA add-on container** — bundles Python+Node+ffmpeg+go2rtc, runs on HAOS (foundation built; needs on-HAOS
+      testing).
+- [ ] **Headless email/password login** — replaces the one-time browser token so no PC is ever needed (the keystone
+      for "install → done"; a focused reverse of eufy's ECDH login).
+- [ ] **Companion HACS integration** — auto-creates the camera entities from the add-on's discovery (Frigate-style),
+      so there's zero manual entry.
+- [ ] Audio (`1301`) / two-way talk; auto-reconnect hardening; per-camera quality (`streamtype`).
 
 ## Notes / limits
 

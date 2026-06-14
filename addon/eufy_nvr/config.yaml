@@ -1,0 +1,38 @@
+name: Eufy NVR Local (experimental)
+version: "0.2.0"
+slug: eufy_nvr
+description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
+url: https://github.com/HallyAus/Eufy-Home-Assistant
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: manual
+init: false
+host_network: true            # needs LAN access to the NVR and to serve RTSP/WebRTC to HA
+hassio_api: true
+homeassistant_api: true
+ports:
+  8554/tcp: 8554
+  1984/tcp: 1984
+  8555/tcp: 8555
+  8555/udp: 8555
+ports_description:
+  8554/tcp: RTSP (HA pulls cameras from here)
+  1984/tcp: go2rtc API / web UI
+  8555/tcp: WebRTC (TCP)
+  8555/udp: WebRTC (UDP)
+# Auth — v0.2 uses a session token (run bridge/get_auth.js once on any PC, paste the values here).
+# Roadmap v0.3: email/password headless login so none of this is needed.
+options:
+  auth_token: ""
+  gtoken: ""
+  user_id: ""
+  station_sn: ""
+  region: "US"
+schema:
+  auth_token: str
+  gtoken: str
+  user_id: str
+  station_sn: str
+  region: list(US|EU)?
