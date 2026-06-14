@@ -3,7 +3,6 @@ version: "0.4.0"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
-codenotary: notarize@home-assistant.io
 arch:
   - aarch64
   - amd64
@@ -23,12 +22,12 @@ homeassistant_api: true
 # Watchdog: Supervisor pings this TCP endpoint; if go2rtc's API stops answering, the add-on is
 # restarted. run.sh ALSO has its own supervise loop (restart-on-crash) so transient engine
 # failures recover in-process without a full container bounce.
-watchdog: "tcp://[HOST]:1984"
+watchdog: "tcp://[HOST]:[PORT:1984]"
 
 # Ingress points the "Open Web UI" button at go2rtc's built-in UI (stream list + WebRTC test player).
 ingress: false
 panel_icon: mdi:cctv
-webui: "http://[HOST]:1984/"
+webui: "http://[HOST]:[PORT:1984]/"
 
 ports:
   8554/tcp: 8554
