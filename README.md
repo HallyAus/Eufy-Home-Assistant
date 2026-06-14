@@ -185,8 +185,10 @@ The integration polls the engine's go2rtc and creates a camera entity for every 
 
 2. In HACS search **"Eufy NVR (local)"** → **Download** → **Restart Home Assistant**.
 3. **Settings → Devices & Services → + Add Integration →** search **"Eufy NVR (local)"**, then enter:
-   - **Host** — where go2rtc runs: **`127.0.0.1`** if you used the add-on (Option A), or the **bridge IP**
-     (e.g. `192.168.1.7`) if you used Option B
+   - **Host** — where go2rtc runs. For the **add-on** (Option A) use your **HA host's LAN IP**
+     (e.g. `192.168.1.177`) — **not** `127.0.0.1`: the integration runs inside HA Core and can't reach a
+     `host_network` add-on over localhost, and HA's own built-in go2rtc already occupies `127.0.0.1:1984`.
+     For the **bridge** (Option B) use the **bridge machine's IP** (e.g. `192.168.1.7`).
    - **API port** — `1984` &nbsp;•&nbsp; **RTSP port** — `8554`
 
    It auto-creates a `camera.eufy_nvr_*` entity per discovered stream, grouped under one "Eufy NVR" device.
@@ -196,7 +198,7 @@ The integration polls the engine's go2rtc and creates a camera entity for every 
 ### Or the Generic Camera integration (no HACS)
 
 **Settings → Devices & Services → Add Integration → Generic Camera** → Stream Source
-`rtsp://<host>:8554/eufy_garage` (one per camera; `<host>` = `127.0.0.1` for the add-on, or the bridge IP).
+`rtsp://<host>:8554/eufy_garage` (one per camera; `<host>` = your **HA host's LAN IP** for the add-on, or the bridge IP).
 Or paste the streams into HA's own `/config/go2rtc.yaml` and reference them from a `camera:` / WebRTC card.
 
 ---
