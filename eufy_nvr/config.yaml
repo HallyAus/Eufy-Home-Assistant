@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.4.0"
+version: "0.4.1"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant

@@ -479,6 +479,23 @@ async def main():
                     if not answered[0] or pc.remoteDescription is None: pending.append(cand)
                     else: await add_cand(cand)
 
+        async def discover_watchdog():
+            # Discovery completes on the DataChannel (handle_devlist via on_frame), NOT on the
+            # signaling WS. After ICE settles the WS goes idle, so the `async for raw in ws`
+            # below blocks forever and never re-checks state["discovered"]. Poll the flag and
+            # close the WS to end the loop; cap the wait so run.sh's retry can take over.
+            for _ in range(80):                      # ~40s ceiling
+                if state["discovered"]:
+                    break
+                await asyncio.sleep(0.5)
+            try:
+                await ws.close()
+            except Exception:
+                pass
+
+        if DISCOVER:
+            asyncio.create_task(discover_watchdog())
+
         try:
             async for raw in ws:
                 await handle(raw)
