@@ -1,0 +1,8 @@
+# Keep POSIX scripts/configs LF-only — a CRLF run.sh breaks the add-on container shebang
+# (#!/usr/bin/with-contenv bashio^M -> "bad interpreter"). Guards Windows-side edits.
+*.sh   text eol=lf
+*.py   text eol=lf
+*.js   text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf

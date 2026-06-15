@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.4.1"
+version: "0.5.0"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
@@ -54,11 +54,23 @@ options:
   password: ""
   region: "US"
   log_level: "info"
+  keep_warm: false
+  token_refresh_hours: 6
+  video_copy: false
 schema:
   email: str
   password: password
   region: list(US|EU)?
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
+  # keep_warm: hold each online camera warm so HA live-view opens instantly (no 5-13s cold start).
+  #   DEFAULT OFF: it costs one continuous H.264 transcode per online camera -> only enable on a
+  #   host with CPU headroom (a low-power aarch64/RPi can be saturated by 3-4 always-on encodes).
+  keep_warm: bool?
+  # token_refresh_hours: how often to re-login and refresh auth.json (the eufy token is ~1-day).
+  token_refresh_hours: int(0,)?
+  # video_copy: publish raw H.265 instead of transcoding to H.264 (lower CPU, but the browser live
+  #   view shows the still thumbnail only). Pair with keep_warm for a low-CPU always-on warm.
+  video_copy: bool?
   station_sn: str?
   captcha_id: str?
   captcha_answer: str?

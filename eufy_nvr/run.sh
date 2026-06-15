@@ -112,17 +112,90 @@ bashio::log.info "Discovered streams:"
 grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${BRIDGE_DIR}/go2rtc.yaml" | sed 's/:.*$//' | sed 's/^/    /' || true
 
 # -----------------------------------------------------------------------------
-# 4) Supervise loop: keep go2rtc up. The Supervisor watchdog (tcp://[HOST]:1984)
-#    bounces the whole container if the API dies; this inner loop recovers faster
-#    from a plain crash and applies a capped backoff to avoid hammering the NVR.
+# Optional raw H.265 passthrough (video_copy=true): lower CPU, but the browser
+# live view shows only the still thumbnail. Exported here so the go2rtc-exec'd
+# eufy_stream.py inherits it. Default is the H.264 transcode (browser-playable).
 # -----------------------------------------------------------------------------
+if bashio::config.true 'video_copy'; then
+    export EUFY_VIDEO_COPY=1
+    bashio::log.warning "video_copy=true -> publishing raw H.265 (live view will be thumbnail-only)."
+fi
+
+# -----------------------------------------------------------------------------
+# keep-warm (opt-in, DEFAULT OFF): hold each ONLINE camera's producer warm so HA
+# live-view opens instantly (no 5-13s WebRTC cold start). Each warmer is a
+# consumer that pulls the stream to /dev/null, keeping go2rtc's eufy_stream.py
+# producer (and its NVR WebRTC session) alive. With the H.264 transcode this is
+# one continuous software encode PER online camera, so it is off by default —
+# enable only on a host with CPU headroom (pair with video_copy for a cheap
+# warm). A periodic re-login refreshes auth.json so a dropped warmer reconnects
+# past the ~1-day eufy token; cadence via 'token_refresh_hours'.
+# -----------------------------------------------------------------------------
+KEEP_WARM="$(bashio::config 'keep_warm' 'false')"
+WARM_PIDS=()
+RELOGIN_PID=""
+
+start_warmers() {
+    local s streams i=0
+    mapfile -t streams < <(grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${BRIDGE_DIR}/go2rtc.yaml" \
+        | grep -v 'offline at discovery' | sed 's/:.*$//' | tr -d '[:space:]')
+    if [ "${#streams[@]}" -eq 0 ]; then
+        bashio::log.warning "keep-warm: no online streams in go2rtc.yaml; nothing to warm."
+        return 0
+    fi
+    bashio::log.info "keep-warm: warming ${#streams[@]} camera(s) (staggered)."
+    for s in "${streams[@]}"; do
+        [ -n "${s}" ] || continue
+        # Stagger each warmer's FIRST cold-start (i*6s + 3s for go2rtc to bind) INSIDE the
+        # subshell, so the main shell reaches `wait` immediately and we don't hit the NVR at once.
+        ( sleep "$(( i * 6 + 3 ))"
+          while true; do
+            ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
+                -i "rtsp://127.0.0.1:8554/${s}" -an -f null - >/dev/null 2>&1 || true
+            sleep 4
+          done ) &
+        WARM_PIDS+=("$!")
+        bashio::log.info "keep-warm: ${s} (pid $!)."
+        i=$(( i + 1 ))
+    done
+}
+
+start_relogin_timer() {
+    local hours; hours="$(bashio::config 'token_refresh_hours' '6')"
+    if ! [ "${hours}" -gt 0 ] 2>/dev/null; then
+        bashio::log.warning "token_refresh_hours='${hours}' invalid/<=0; periodic re-login disabled."
+        return 0
+    fi
+    ( while true; do
+        sleep "$(( hours * 3600 ))"
+        bashio::log.info "Refreshing eufy auth token (periodic, every ${hours}h)..."
+        if EUFY_PASSWORD="$(bashio::config 'password')" python3 auth_login.py >/dev/null 2>&1; then
+            chmod 600 "${BRIDGE_DIR}/auth.json" 2>/dev/null || true
+            bashio::log.info "auth.json refreshed."
+        else
+            bashio::log.warning "Periodic token refresh failed; will retry next cycle."
+        fi
+      done ) &
+    RELOGIN_PID=$!
+}
+
 term() {
-    bashio::log.info "Received stop signal; shutting down go2rtc (pid ${GO2RTC_PID:-?})."
+    bashio::log.info "Received stop signal; shutting down go2rtc (pid ${GO2RTC_PID:-?}) + warmers."
+    [ -n "${RELOGIN_PID:-}" ] && kill "${RELOGIN_PID}" 2>/dev/null || true
+    for p in "${WARM_PIDS[@]:-}"; do [ -n "${p}" ] && kill "${p}" 2>/dev/null || true; done
+    # best-effort: reap any warmer ffmpeg children still pulling the warm streams
+    if command -v pkill >/dev/null 2>&1; then pkill -f 'rtsp://127.0.0.1:8554/eufy_' 2>/dev/null || true; fi
     [ -n "${GO2RTC_PID:-}" ] && kill -TERM "${GO2RTC_PID}" 2>/dev/null || true
     exit 0
 }
 trap term SIGTERM SIGINT
 
+# -----------------------------------------------------------------------------
+# 4) Supervise loop: keep go2rtc up. The Supervisor watchdog (tcp://[HOST]:1984)
+#    bounces the whole container if the API dies; this inner loop recovers faster
+#    from a plain crash and applies a capped backoff to avoid hammering the NVR.
+# -----------------------------------------------------------------------------
+WARMERS_STARTED=0
 backoff=2
 while true; do
     bashio::log.info "Starting go2rtc (RTSP :8554, WebRTC :8555, API/UI :1984, log=${LOG_LEVEL})..."
@@ -131,6 +204,15 @@ while true; do
     # Run in the background so the trap can forward SIGTERM promptly during HA shutdown.
     ./bin/go2rtc -config go2rtc.yaml &
     GO2RTC_PID=$!
+
+    # Start warmers + token refresher once. They self-heal across go2rtc restarts (the warmer
+    # ffmpeg retries until go2rtc is back); start_warmers returns at once (stagger is in-warmer).
+    if [ "${WARMERS_STARTED}" -eq 0 ] && [ "${KEEP_WARM}" = 'true' ]; then
+        start_warmers
+        start_relogin_timer
+        WARMERS_STARTED=1
+    fi
+
     set +o errexit
     wait "${GO2RTC_PID}"
     rc=$?

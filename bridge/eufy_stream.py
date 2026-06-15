@@ -281,14 +281,26 @@ async def main():
     # Pick the Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file.
     ffmpeg_proc = None
     if RTSP_URL:
+        # Transcode HEVC -> H.264 so Home Assistant / browsers can render the LIVE view.
+        # (H.265 only shows the still thumbnail; most browsers can't play it live.) Set
+        # EUFY_VIDEO_COPY=1 to passthrough raw H.265 instead (lower CPU, thumbnail only).
+        if os.environ.get("EUFY_VIDEO_COPY") == "1":
+            vcodec = ["-c:v", "copy"]
+            _codec_label = "H.265 (copy)"
+        else:
+            # short GOP (keyframe ~every 1s) so a NEW consumer (HA opening live view) gets an
+            # IDR almost immediately instead of waiting a full GOP; zerolatency drops B-frames.
+            vcodec = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                      "-pix_fmt", "yuv420p", "-g", "25", "-keyint_min", "25", "-sc_threshold", "0"]
+            _codec_label = "H.264 (transcoded)"
         ffmpeg_proc = await asyncio.create_subprocess_exec(
             FFMPEG, "-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer",
             "-f", "hevc", "-r", "25", "-i", "pipe:",
-            "-c:v", "copy", "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
+            *vcodec, "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL)
         sink = ffmpeg_proc.stdin
-        log(f"ffmpeg publishing H.265 -> {RTSP_URL}")
+        log(f"ffmpeg publishing {_codec_label} -> {RTSP_URL}")
     elif STDOUT_MODE:
         sink = sys.stdout.buffer
     else:
