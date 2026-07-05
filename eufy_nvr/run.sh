@@ -39,6 +39,7 @@ export EUFY_EMAIL="$(bashio::config 'email')"
 export EUFY_PASSWORD="$(bashio::config 'password')"
 export EUFY_REGION="$(bashio::config 'region' 'US')"
 export EUFY_AUTH="${BRIDGE_DIR}/auth.json"
+if bashio::config.has_value 'country'; then export EUFY_COUNTRY="$(bashio::config 'country')"; fi
 if bashio::config.has_value 'station_sn'; then export EUFY_STATION_SN="$(bashio::config 'station_sn')"; fi
 if bashio::config.has_value 'captcha_id'; then export EUFY_CAPTCHA_ID="$(bashio::config 'captcha_id')"; fi
 if bashio::config.has_value 'captcha_answer'; then export EUFY_CAPTCHA_ANSWER="$(bashio::config 'captcha_answer')"; fi
