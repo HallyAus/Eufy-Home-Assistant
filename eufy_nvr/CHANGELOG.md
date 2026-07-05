@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- **More login regions + a separate account country.** The `region` option now offers
+  US | EU | IE (the eufy *server* your account lives on), and a new optional `country` field
+  lets accounts registered outside those regions — e.g. AU — authenticate against the nearest
+  server while still identifying their real country. Leave `country` blank to use the region.
+- Removed a hard-coded device-serial fallback from the bridge; it now relies on auto-discovery
+  or the optional `station_sn` override.
+
 ## 0.5.1
 
 - **Offline cameras no longer create dead "no feed" entities.** Discovery used to publish an

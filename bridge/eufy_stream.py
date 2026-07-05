@@ -42,7 +42,7 @@ def _bin(name):
     return os.environ.get(name.upper(), local if os.path.exists(local) else name)
 
 AUTH = json.load(open(os.environ.get("EUFY_AUTH", os.path.join(ROOT, "auth.json"))))
-STATION_SN = os.environ.get("EUFY_STATION_SN") or AUTH.get("stationSn") or "T8N005102610052C"
+STATION_SN = os.environ.get("EUFY_STATION_SN") or AUTH.get("stationSn") or ""
 
 def _decrypt_user_id():
     if AUTH.get("userId"):

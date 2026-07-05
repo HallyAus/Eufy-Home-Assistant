@@ -8,7 +8,9 @@ engine needs, and writes auth.json in the shape eufy_stream.py expects.
 
 Env in:
   EUFY_EMAIL, EUFY_PASSWORD              required
-  EUFY_REGION                            "US" | "EU" (default US)
+  EUFY_REGION                            server region: US | EU | IE (default US)
+  EUFY_COUNTRY                           account country code (e.g. US, EU, IE, AU);
+                                         defaults to EUFY_REGION when unset
   EUFY_STATION_SN                        optional override / fallback
   EUFY_CAPTCHA_ID, EUFY_CAPTCHA_ANSWER   optional, if a prior run reported a captcha
   EUFY_AUTH                              output path (default <bridge>/auth.json)
@@ -62,7 +64,10 @@ async def main() -> int:
         return 2
     region_opt = (os.environ.get("EUFY_REGION") or "US").strip().upper()
     region = REGION_MAP.get(region_opt, "us-pr")
-    country = region_opt if region_opt in ("US", "EU", "IE") else "US"
+    # Account country (the login `ab` field / Web-Country header). Defaults to the region, but
+    # can be set independently (EUFY_COUNTRY) so accounts registered outside US/EU/IE — e.g. AU —
+    # authenticate against the nearest server region while still identifying their real country.
+    country = (os.environ.get("EUFY_COUNTRY") or region_opt).strip().upper()
 
     try:
         creds = await ec.login(
@@ -101,7 +106,7 @@ async def main() -> int:
         "gtoken": gtoken,
         "userId": user_id,
         "stationSn": station_sn,
-        "webCountry": country if country in ("US", "EU") else "US",
+        "webCountry": country,
         "appName": "eufy_mega",
     }
     old = os.umask(0o077)

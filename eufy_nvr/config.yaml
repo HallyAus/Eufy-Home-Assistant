@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.5.1"
+version: "0.5.2"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
@@ -46,6 +46,11 @@ ports_description:
 # ECDH share-key wrapper; see bridge/eufy_cloud.py), derives the NVR station_sn from the
 # station list, and writes auth.json. Credentials live only in the add-on options + an
 # in-container auth.json (chmod 600) and are never logged.
+#   region         -- eufy SERVER region your account lives on: US | EU | IE (default US).
+#   country        -- OPTIONAL account country code (e.g. AU, NZ, CA). Leave blank to use the
+#                     region as the country. Set this if your account is registered outside
+#                     US/EU/IE (e.g. AU) — it authenticates against the chosen region server
+#                     while identifying your real country. Try region US first if unsure.
 #   station_sn     -- optional: set if auto-discovery can't find the NVR serial.
 #   captcha_id / captcha_answer -- optional: only if a login is challenged with a graphic
 #                     captcha (the log prints the captcha_id; solve it and set both, restart).
@@ -53,6 +58,7 @@ options:
   email: ""
   password: ""
   region: "US"
+  country: ""
   log_level: "info"
   keep_warm: false
   token_refresh_hours: 6
@@ -60,7 +66,8 @@ options:
 schema:
   email: str
   password: password
-  region: list(US|EU)?
+  region: list(US|EU|IE)?
+  country: str?
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
   # keep_warm: hold each online camera warm so HA live-view opens instantly (no 5-13s cold start).
   #   DEFAULT OFF: it costs one continuous H.264 transcode per online camera -> only enable on a
