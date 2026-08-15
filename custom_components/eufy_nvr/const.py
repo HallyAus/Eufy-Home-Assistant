@@ -22,8 +22,8 @@ CONF_RTSP_PORT = "rtsp_port"
 # points at Core rather than the add-on. mDNS is a better starting value; users
 # can enter the HA host's LAN address when their network does not resolve it.
 DEFAULT_HOST = "homeassistant.local"
-DEFAULT_API_PORT = 1984  # go2rtc REST API / web UI
-DEFAULT_RTSP_PORT = 8554  # go2rtc RTSP server
+DEFAULT_API_PORT = 1985  # dedicated Eufy go2rtc REST API / web UI
+DEFAULT_RTSP_PORT = 8556  # dedicated Eufy go2rtc RTSP server
 
 # How often the coordinator re-queries go2rtc so newly added cameras appear and
 # availability is kept fresh. Cheap localhost call; 30s is responsive enough.

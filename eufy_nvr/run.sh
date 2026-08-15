@@ -7,9 +7,9 @@
 #   3. Generate go2rtc.yaml from the discovered cameras.
 #   4. Run go2rtc under a supervise loop (restart-on-crash with backoff).
 #
-# go2rtc binds RTSP :8554 / API :1984 / WebRTC :8555 on the HOST network, so HA
+# go2rtc binds dedicated RTSP :8556 / API :1985 / WebRTC :8557 ports on the HOST network, so HA
 # reaches the cameras through the HA host's LAN address, while internal warmers use loopback. The
-# Supervisor watchdog can poll tcp://[HOST]:1984.
+# Supervisor watchdog can poll tcp://[HOST]:1985.
 # =============================================================================
 set -o errexit
 set -o nounset
@@ -18,6 +18,9 @@ set -o pipefail
 BRIDGE_DIR="/opt/eufy/bridge"
 STATE_DIR="/data"
 CONFIG_PATH="${STATE_DIR}/go2rtc.yaml"
+export GO2RTC_API_PORT="1985"
+export GO2RTC_RTSP_PORT="8556"
+export GO2RTC_WEBRTC_PORT="8557"
 mkdir -p "${STATE_DIR}"
 cd "${BRIDGE_DIR}"
 
@@ -165,7 +168,7 @@ start_warmers() {
         ( sleep "$(( i * 6 + 3 ))"
           while true; do
             ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
-                -i "rtsp://127.0.0.1:8554/${s}" -an -f null - >/dev/null 2>&1 || true
+                -i "rtsp://127.0.0.1:${GO2RTC_RTSP_PORT}/${s}" -an -f null - >/dev/null 2>&1 || true
             sleep 4
           done ) &
         WARM_PIDS+=("$!")
@@ -198,21 +201,21 @@ term() {
     [ -n "${RELOGIN_PID:-}" ] && kill "${RELOGIN_PID}" 2>/dev/null || true
     for p in "${WARM_PIDS[@]:-}"; do [ -n "${p}" ] && kill "${p}" 2>/dev/null || true; done
     # best-effort: reap any warmer ffmpeg children still pulling the warm streams
-    if command -v pkill >/dev/null 2>&1; then pkill -f 'rtsp://127.0.0.1:8554/eufy_' 2>/dev/null || true; fi
+    if command -v pkill >/dev/null 2>&1; then pkill -f "rtsp://127.0.0.1:${GO2RTC_RTSP_PORT}/eufy_" 2>/dev/null || true; fi
     [ -n "${GO2RTC_PID:-}" ] && kill -TERM "${GO2RTC_PID}" 2>/dev/null || true
     exit 0
 }
 trap term SIGTERM SIGINT
 
 # -----------------------------------------------------------------------------
-# 4) Supervise loop: keep go2rtc up. The Supervisor watchdog (tcp://[HOST]:1984)
+# 4) Supervise loop: keep go2rtc up. The Supervisor watchdog (tcp://[HOST]:1985)
 #    bounces the whole container if the API dies; this inner loop recovers faster
 #    from a plain crash and applies a capped backoff to avoid hammering the NVR.
 # -----------------------------------------------------------------------------
 WARMERS_STARTED=0
 backoff=2
 while true; do
-    bashio::log.info "Starting go2rtc (RTSP :8554, WebRTC :8555, API/UI :1984, log=${LOG_LEVEL})..."
+    bashio::log.info "Starting go2rtc (RTSP :${GO2RTC_RTSP_PORT}, WebRTC :${GO2RTC_WEBRTC_PORT}, API/UI :${GO2RTC_API_PORT}, log=${LOG_LEVEL})..."
     started=$(date +%s)
 
     # Run in the background so the trap can forward SIGTERM promptly during HA shutdown.

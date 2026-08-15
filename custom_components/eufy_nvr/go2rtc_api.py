@@ -83,8 +83,8 @@ def rtsp_url(host: str, port: int, stream: str) -> str:
     return f"rtsp://{_url_host(host)}:{validate_port(port)}/{quote(stream, safe='_-')}"
 
 
-def extract_streams(payload: Any) -> dict[str, dict[str, Any]]:
-    """Return only eufy streams from either supported go2rtc response shape."""
+def _stream_map(payload: Any) -> dict[str, dict[str, Any]]:
+    """Normalize either supported go2rtc response shape."""
     if isinstance(payload, dict) and "streams" in payload:
         payload = payload["streams"]
     if not isinstance(payload, dict):
@@ -92,8 +92,22 @@ def extract_streams(payload: Any) -> dict[str, dict[str, Any]]:
     return {
         name: info if isinstance(info, dict) else {}
         for name, info in payload.items()
-        if isinstance(name, str) and name.startswith(STREAM_PREFIX)
+        if isinstance(name, str)
     }
+
+
+def extract_streams(payload: Any) -> dict[str, dict[str, Any]]:
+    """Return only Eufy streams from a go2rtc response."""
+    return {
+        name: info
+        for name, info in _stream_map(payload).items()
+        if name.startswith(STREAM_PREFIX)
+    }
+
+
+def stream_count(payload: Any) -> int:
+    """Return the total number of named streams in a go2rtc response."""
+    return len(_stream_map(payload))
 
 
 def stream_summary(info: dict[str, Any]) -> dict[str, int | bool]:
@@ -123,6 +137,7 @@ class Go2RtcClient:
         self.host = normalize_host(host)
         self.api_port = validate_port(api_port)
         self.url = api_url(self.host, self.api_port)
+        self.total_stream_count = 0
         self._session = session
         self._timeout = timeout
 
@@ -148,6 +163,7 @@ class Go2RtcClient:
             ) from err
 
         try:
+            self.total_stream_count = stream_count(payload)
             return extract_streams(payload)
         except ValueError as err:
             raise Go2RtcPayloadError(

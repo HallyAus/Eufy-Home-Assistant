@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.1
+
+- Move the add-on's go2rtc to dedicated host-network ports: API `1985`, RTSP `8556`, and WebRTC
+  `8557`. Home Assistant's built-in go2rtc already owns API `1984` on HAOS, so v0.6.0 could connect
+  the companion integration to the wrong server and report that no `eufy_*` cameras existed.
+- Detect a reachable go2rtc containing only non-Eufy streams and report it as the wrong instance,
+  with the dedicated Eufy API port in the corrective message.
+
 ## 0.6.0
 
 - Fix discovery and streaming for EU and IE accounts by routing `ws/sign` and the signaling WebSocket

@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.6.0"
+version: "0.6.1"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
@@ -20,23 +20,23 @@ host_network: true
 # Watchdog: Supervisor pings this TCP endpoint; if go2rtc's API stops answering, the add-on is
 # restarted. run.sh ALSO has its own supervise loop (restart-on-crash) so transient engine
 # failures recover in-process without a full container bounce.
-watchdog: "tcp://[HOST]:[PORT:1984]"
+watchdog: "tcp://[HOST]:[PORT:1985]"
 
 # Ingress points the "Open Web UI" button at go2rtc's built-in UI (stream list + WebRTC test player).
 ingress: false
 panel_icon: mdi:cctv
-webui: "http://[HOST]:[PORT:1984]/"
+webui: "http://[HOST]:[PORT:1985]/"
 
 ports:
-  8554/tcp: 8554
-  1984/tcp: 1984
-  8555/tcp: 8555
-  8555/udp: 8555
+  8556/tcp: 8556
+  1985/tcp: 1985
+  8557/tcp: 8557
+  8557/udp: 8557
 ports_description:
-  8554/tcp: RTSP (HA pulls cameras from rtsp://<HA-LAN-IP>:8554/eufy_<name>)
-  1984/tcp: go2rtc API / web UI (also the watchdog endpoint)
-  8555/tcp: WebRTC (TCP candidate)
-  8555/udp: WebRTC (UDP candidate)
+  8556/tcp: RTSP (HA pulls cameras from rtsp://<HA-LAN-IP>:8556/eufy_<name>)
+  1985/tcp: go2rtc API / web UI (also the watchdog endpoint)
+  8557/tcp: WebRTC (TCP candidate)
+  8557/udp: WebRTC (UDP candidate)
 
 # --- Auth (v0.4): headless email/password login (no token paste) ---------------
 # run.sh runs auth_login.py, which logs into the eufy passport (reversed ECDH+AES login --

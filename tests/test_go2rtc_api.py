@@ -58,6 +58,7 @@ class StreamPayloadTest(unittest.TestCase):
     def test_extracts_only_eufy_streams(self):
         streams = api.extract_streams(self.PAYLOAD)
         self.assertEqual(set(streams), {"eufy_garage", "eufy_front_gate"})
+        self.assertEqual(api.stream_count(self.PAYLOAD), 3)
 
     def test_accepts_wrapped_payload(self):
         streams = api.extract_streams({"streams": self.PAYLOAD})

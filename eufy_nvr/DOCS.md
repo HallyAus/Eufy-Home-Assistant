@@ -38,7 +38,7 @@ cloud; the video itself is pulled LAN-direct from the NVR.
    list, and writes an in-container `auth.json` (chmod 600). Your password is passed only via the
    environment, scrubbed right after login, and never printed to the log.
 4. **Start** the add-on and watch the **Log** tab. It logs in, discovers your cameras, generates the
-   stream list, and starts go2rtc. Click **Open Web UI** (go2rtc on port 1984) to see/test the streams.
+   stream list, and starts go2rtc. Click **Open Web UI** (Eufy go2rtc on port 1985) to see/test the streams.
 
 > The NVR allows **one** active live session, and a passport login bumps the signed-in app session.
 > Avoid logging into the eufy mobile app at the same moment the add-on is starting/discovering/streaming.
@@ -47,14 +47,14 @@ cloud; the video itself is pulled LAN-direct from the NVR.
 
 On the HA host the add-on serves:
 
-- RTSP: `rtsp://<HA-LAN-IP>:8554/eufy_<camera>`
-- go2rtc UI / API: `http://<ha-ip>:1984/`
+- RTSP: `rtsp://<HA-LAN-IP>:8556/eufy_<camera>`
+- go2rtc UI / API: `http://<ha-ip>:1985/`
 
 Stream names are slugified from your camera names (e.g. "Garage" -> `eufy_garage`); the exact list is
 printed in the add-on log and shown in the go2rtc UI. To surface them as camera entities, either:
 
 - install the companion **"Eufy NVR (local)"** HACS integration (auto-creates one camera per stream), or
-- use the **Generic Camera** integration -> *Stream Source* `rtsp://<HA-LAN-IP>:8554/eufy_garage`, or
+- use the **Generic Camera** integration -> *Stream Source* `rtsp://<HA-LAN-IP>:8556/eufy_garage`, or
 - add them to HA's own `/config/go2rtc.yaml` and reference from a `camera:` / WebRTC card.
 
 Streams are **on-demand**: the engine only connects to the NVR while something is actually pulling a
@@ -64,16 +64,16 @@ stream, so the single live session is freed when nobody is watching.
 
 | Port      | Purpose                                                        |
 |-----------|---------------------------------------------------------------|
-| 8554/tcp  | RTSP — HA pulls cameras from here                             |
-| 1984/tcp  | go2rtc API + web UI (also the Supervisor watchdog endpoint)   |
-| 8555/tcp+udp | WebRTC candidates                                          |
+| 8556/tcp  | RTSP — HA pulls cameras from here                             |
+| 1985/tcp  | Eufy go2rtc API + UI (also the Supervisor watchdog endpoint)  |
+| 8557/tcp+udp | WebRTC candidates                                          |
 
 The add-on runs with `host_network: true` (required: LAN-direct media to the NVR + same-host RTSP to
 HA), so these ports are opened directly on the host.
 
 ## Reliability
 
-- **Supervisor watchdog** polls `tcp://[HOST]:1984`; if go2rtc's API stops answering, the container
+- **Supervisor watchdog** polls `tcp://[HOST]:1985`; if go2rtc's API stops answering, the container
   is restarted automatically.
 - **Persistent recovery state** keeps the last successful auth session, discovery result, and generated
   go2rtc configuration in `/data`, so a transient cloud/login outage does not erase a working local setup.

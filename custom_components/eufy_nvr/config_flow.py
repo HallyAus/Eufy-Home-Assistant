@@ -44,6 +44,8 @@ async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
     except Go2RtcError as err:
         raise CannotConnect from err
     if not streams:
+        if client.total_stream_count:
+            raise WrongInstance
         raise NoStreams
     return client.host, len(streams)
 
@@ -85,6 +87,8 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_endpoint"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except WrongInstance:
+                errors["base"] = "wrong_instance"
             except NoStreams:
                 errors["base"] = "no_streams"
             else:
@@ -122,6 +126,8 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_endpoint"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except WrongInstance:
+                errors["base"] = "wrong_instance"
             except NoStreams:
                 errors["base"] = "no_streams"
             else:
@@ -151,3 +157,7 @@ class InvalidEndpoint(Exception):
 
 class NoStreams(Exception):
     """Raised when go2rtc is reachable but has no Eufy streams."""
+
+
+class WrongInstance(Exception):
+    """Raised when the endpoint contains only non-Eufy streams."""

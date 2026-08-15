@@ -100,7 +100,7 @@ exposes plain RTSP via a local **go2rtc**; Home Assistant simply pulls it.
  eufy NVR  WebRTC        │  eufy_stream.py (aiortc)  ──►  sctp_oracle.js (eufy libsctp WASM, Node)         │
  T8N00 ───────────────►  │        │  startStream cmd 1003 + heartbeat                                       │
  (LAN-direct DTLS/SCTP)  │        ▼  H.265 Annex-B                                                           │
-                         │     ffmpeg ──►  go2rtc ──►  rtsp://<host>:8554/eufy_<camera>  (one per camera)    │
+                         │     ffmpeg ──►  go2rtc ──►  rtsp://<host>:<rtsp-port>/eufy_<camera>              │
                          └────────────────────────────────────────────────────────────────────────────────┘
                                                        │ RTSP pull (LAN)
                                                        ▼
@@ -127,7 +127,7 @@ Runs everything on your HA host; no always-on PC and no token paste.
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
 4. **Start** the add-on and watch the **Log** tab. It logs in, discovers your cameras, generates the stream list,
-   and starts go2rtc. Click **Open Web UI** (go2rtc :1984) to test the streams.
+   and starts go2rtc. Click **Open Web UI** (the Eufy go2rtc on port `1985`) to test the streams.
 
 Your password is passed only via the environment, scrubbed right after login, and never printed to the log.
 
@@ -194,7 +194,8 @@ The integration polls the engine's go2rtc and creates a camera entity for every 
      (e.g. `192.168.1.177`) — **not** `127.0.0.1`: the integration runs inside HA Core and can't reach a
      `host_network` add-on over localhost, and HA's own built-in go2rtc already occupies `127.0.0.1:1984`.
      For the **bridge** (Option B) use the **bridge machine's IP** (e.g. `192.168.1.7`).
-   - **API port** — `1984` &nbsp;•&nbsp; **RTSP port** — `8554`
+   - **Add-on:** API port `1985` &nbsp;•&nbsp; RTSP port `8556`
+   - **Manual bridge defaults:** API port `1984` &nbsp;•&nbsp; RTSP port `8554`
 
    It auto-creates a `camera.eufy_nvr_*` entity per discovered stream, grouped under one "Eufy NVR" device.
 
@@ -203,7 +204,8 @@ The integration polls the engine's go2rtc and creates a camera entity for every 
 ### Or the Generic Camera integration (no HACS)
 
 **Settings → Devices & Services → Add Integration → Generic Camera** → Stream Source
-`rtsp://<host>:8554/eufy_garage` (one per camera; `<host>` = your **HA host's LAN IP** for the add-on, or the bridge IP).
+`rtsp://<host>:<port>/eufy_garage` (one per camera; use port `8556` for the add-on or `8554` for the
+manual bridge; `<host>` is your **HA host's LAN IP** for the add-on, or the bridge IP).
 Or paste the streams into HA's own `/config/go2rtc.yaml` and reference them from a `camera:` / WebRTC card.
 
 ---
@@ -224,7 +226,10 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**Next (v0.6.0):** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
+**v0.6.1:** uses dedicated add-on ports (`1985` API, `8556` RTSP, `8557` WebRTC) so Home Assistant's
+built-in go2rtc cannot be mistaken for the Eufy service. The setup flow now identifies that wrong-instance case.
+
+**v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,
 and reproducible version-pinned add-on builds. It also includes region-aware signaling for US/EU/IE accounts.
 

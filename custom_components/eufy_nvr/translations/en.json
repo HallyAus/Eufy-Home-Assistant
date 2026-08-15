@@ -11,8 +11,8 @@
         },
         "data_description": {
           "host": "IP or hostname of the machine running the bridge/add-on. For the add-on, use the Home Assistant host's LAN address.",
-          "api_port": "go2rtc REST API / web UI port (default 1984), used to auto-discover cameras.",
-          "rtsp_port": "Port go2rtc serves RTSP on (default 8554), used to stream each camera."
+          "api_port": "Dedicated Eufy go2rtc API / web UI port (default 1985), used to auto-discover cameras.",
+          "rtsp_port": "Dedicated Eufy go2rtc RTSP port (default 8556), used to stream each camera."
         }
       },
       "reconfigure": {
@@ -28,6 +28,7 @@
     "error": {
       "cannot_connect": "Could not reach go2rtc at that host/port. Check that the Eufy NVR add-on or bridge is running and the go2rtc API port is correct.",
       "invalid_endpoint": "Enter a valid hostname or IP address, with API and RTSP ports in their separate fields.",
+      "wrong_instance": "That address is another go2rtc instance containing non-Eufy streams—usually Home Assistant's built-in server on port 1984. Use the Eufy add-on API port 1985.",
       "no_streams": "go2rtc is reachable, but it has not published any eufy_* cameras. Finish add-on discovery or check its log, then try again."
     },
     "abort": {

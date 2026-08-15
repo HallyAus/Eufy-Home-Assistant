@@ -8,6 +8,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleasePackagingTest(unittest.TestCase):
+    EUFY_API_PORT = 1985
+    EUFY_RTSP_PORT = 8556
+    EUFY_WEBRTC_PORT = 8557
+
     def test_integration_addon_and_image_ref_share_one_version(self):
         manifest_version = json.loads(
             (ROOT / "custom_components/eufy_nvr/manifest.json").read_text()
@@ -37,6 +41,25 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn('EUFY_AUTH="${STATE_DIR}/auth.json"', run_script)
         self.assertIn('if [ -s "${EUFY_AUTH}" ]', run_script)
         self.assertNotIn('rm -f "${EUFY_AUTH}"', run_script)
+
+    def test_addon_uses_ports_dedicated_to_eufy(self):
+        config = (ROOT / "eufy_nvr/config.yaml").read_text()
+        run_script = (ROOT / "eufy_nvr/run.sh").read_text()
+        dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
+        constants = (ROOT / "custom_components/eufy_nvr/const.py").read_text()
+
+        self.assertIn(f"DEFAULT_API_PORT = {self.EUFY_API_PORT}", constants)
+        self.assertIn(f"DEFAULT_RTSP_PORT = {self.EUFY_RTSP_PORT}", constants)
+        self.assertIn(f"{self.EUFY_API_PORT}/tcp: {self.EUFY_API_PORT}", config)
+        self.assertIn(f"{self.EUFY_RTSP_PORT}/tcp: {self.EUFY_RTSP_PORT}", config)
+        self.assertIn(f"{self.EUFY_WEBRTC_PORT}/tcp: {self.EUFY_WEBRTC_PORT}", config)
+        self.assertIn(f'GO2RTC_API_PORT="{self.EUFY_API_PORT}"', run_script)
+        self.assertIn(f'GO2RTC_RTSP_PORT="{self.EUFY_RTSP_PORT}"', run_script)
+        self.assertIn(f'GO2RTC_WEBRTC_PORT="{self.EUFY_WEBRTC_PORT}"', run_script)
+        self.assertIn(f"127.0.0.1:{self.EUFY_API_PORT}/api", dockerfile)
+
+        for occupied_port in (1984, 8554, 8555):
+            self.assertNotRegex(config, rf"(?m)^\s+{occupied_port}/(?:tcp|udp):")
 
 
 if __name__ == "__main__":

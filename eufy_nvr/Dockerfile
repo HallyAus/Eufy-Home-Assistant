@@ -64,7 +64,7 @@ RUN if [ ! -e /usr/bin/python ]; then ln -s /usr/bin/python3 /usr/bin/python; fi
 # keeps the image reproducible; bump on release.
 # ---------------------------------------------------------------------------
 ARG REPO_URL="https://github.com/HallyAus/Eufy-Home-Assistant"
-ARG REPO_REF="v0.6.0"
+ARG REPO_REF="v0.6.1"
 RUN git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" /tmp/repo \
     && mkdir -p /opt/eufy \
     && cp -r /tmp/repo/bridge /opt/eufy/bridge \
@@ -108,9 +108,9 @@ RUN python3 -c "import av, aiortc, Crypto, cryptography; from aiortc import RTCP
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
-# Drop a build-time healthcheck against go2rtc's API (the same port the watchdog uses).
+# Drop a build-time healthcheck against Eufy's dedicated go2rtc API port.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:1984/api || exit 1
+    CMD curl -fsS http://127.0.0.1:1985/api || exit 1
 
 WORKDIR /opt/eufy/bridge
 CMD [ "/run.sh" ]
