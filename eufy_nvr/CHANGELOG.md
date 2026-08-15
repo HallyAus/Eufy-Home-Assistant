@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.4
+
+- When `homeassistant.local` is unreachable from the Home Assistant Core container, retry the
+  configured internal URL's LAN host automatically. This keeps the friendly default while avoiding
+  mDNS failures inside HAOS containers.
+
 ## 0.6.3
 
 - Preserve line boundaries when parsing discovered stream names for `keep_warm`, so each camera gets

@@ -43,6 +43,19 @@ class EndpointTest(unittest.TestCase):
             with self.subTest(port=port), self.assertRaises(ValueError):
                 api.validate_port(port)
 
+    def test_extracts_host_from_home_assistant_internal_url(self):
+        self.assertEqual(
+            api.host_from_internal_url("http://192.168.1.177:8123"),
+            "192.168.1.177",
+        )
+        self.assertEqual(
+            api.host_from_internal_url("https://[fd00::10]:8123"), "fd00::10"
+        )
+
+        for value in (None, "", "not a URL", "ftp://192.168.1.177"):
+            with self.subTest(value=value):
+                self.assertIsNone(api.host_from_internal_url(value))
+
 
 class StreamPayloadTest(unittest.TestCase):
     PAYLOAD = {

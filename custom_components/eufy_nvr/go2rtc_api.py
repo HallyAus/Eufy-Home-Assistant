@@ -68,6 +68,27 @@ def normalize_host(value: str) -> str:
     return raw.lower()
 
 
+def host_from_internal_url(value: str | None) -> str | None:
+    """Extract a normalized host from Home Assistant's configured internal URL."""
+    if not value:
+        return None
+    try:
+        parsed = urlsplit(value)
+    except ValueError:
+        return None
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.hostname
+        or parsed.username
+        or parsed.password
+    ):
+        return None
+    try:
+        return normalize_host(parsed.hostname)
+    except ValueError:
+        return None
+
+
 def _url_host(host: str) -> str:
     normalized = normalize_host(host)
     return f"[{normalized}]" if ":" in normalized else normalized

@@ -24,7 +24,12 @@ from .const import (
     DOMAIN,
     REQUEST_TIMEOUT,
 )
-from .go2rtc_api import Go2RtcClient, Go2RtcError
+from .go2rtc_api import (
+    Go2RtcClient,
+    Go2RtcError,
+    host_from_internal_url,
+    normalize_host,
+)
 
 
 async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
@@ -33,16 +38,30 @@ async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
     Distinguishes bad input, an unreachable API, and a reachable bridge that has
     not published any Eufy cameras yet so the setup form can be actionable.
     """
+    session = async_get_clientsession(hass)
     try:
-        client = Go2RtcClient(
-            async_get_clientsession(hass), host, api_port, REQUEST_TIMEOUT
-        )
+        normalized_host = normalize_host(host)
     except ValueError as err:
         raise InvalidEndpoint from err
-    try:
-        streams = await client.async_get_streams()
-    except Go2RtcError as err:
-        raise CannotConnect from err
+
+    candidates = [normalized_host]
+    if normalized_host == DEFAULT_HOST:
+        fallback = host_from_internal_url(hass.config.internal_url)
+        if fallback and fallback != normalized_host:
+            candidates.append(fallback)
+
+    last_error: Go2RtcError | None = None
+    for candidate in candidates:
+        client = Go2RtcClient(session, candidate, api_port, REQUEST_TIMEOUT)
+        try:
+            streams = await client.async_get_streams()
+        except Go2RtcError as err:
+            last_error = err
+            continue
+        break
+    else:
+        raise CannotConnect from last_error
+
     if not streams:
         if client.total_stream_count:
             raise WrongInstance
