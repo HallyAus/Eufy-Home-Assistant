@@ -15,6 +15,9 @@ fs.mkdirSync(WORKER, { recursive: true });
 fs.mkdirSync(BIN, { recursive: true });
 const isWin = process.platform === "win32";
 const arch = process.arch === "arm64" ? "arm64" : "amd64";
+// Keep this aligned with security.eufy.com's current web-client versionControl.
+// These files are runtime-critical: a missing worker must fail the image build.
+const SCTP_VERSION = "0_0_2";
 
 function dl(url, dest) {
   return new Promise((res, rej) => {
@@ -36,11 +39,26 @@ function unzip(zip, outdir) {
 (async () => {
   // 1) eufy workers (public static assets). Versions match the web client at time of writing.
   const CDN = "https://security.eufy.com/plugin/";
-  const workers = ["libsctp_0_0_1.js", "libsctp_0_0_1.wasm", "worker_sctp_send_0_0_1.js", "worker_sctp_recv_0_0_1.js"];
+  const workers = [
+    `libsctp_${SCTP_VERSION}.js`,
+    `libsctp_${SCTP_VERSION}.wasm`,
+    `worker_sctp_send_${SCTP_VERSION}.js`,
+    `worker_sctp_recv_${SCTP_VERSION}.js`,
+  ];
+  const workerFailures = [];
   for (const w of workers) {
     process.stdout.write(`eufy worker ${w} ... `);
     try { console.log(await dl(CDN + w, path.join(WORKER, w)), "bytes"); }
-    catch (e) { console.log("FAILED:", e.message, "\n  (eufy may have bumped the version; check security.eufy.com/js for the libsctp/worker version and edit this script + sctp_oracle.js)"); }
+    catch (e) {
+      workerFailures.push(w);
+      console.log("FAILED:", e.message);
+    }
+  }
+  if (workerFailures.length) {
+    throw new Error(
+      `Missing runtime-critical eufy worker assets: ${workerFailures.join(", ")}. ` +
+      "Check security.eufy.com's web-client versionControl and update SCTP_VERSION."
+    );
   }
 
   // 2) go2rtc
@@ -78,4 +96,7 @@ function unzip(zip, outdir) {
   }
 
   console.log("\nDone. Next: `node get_auth.js` (one-time login), then start_bridge" + (isWin ? ".cmd" : ".sh"));
-})();
+})().catch((error) => {
+  console.error("fetch_deps FATAL:", error.message);
+  process.exitCode = 1;
+});

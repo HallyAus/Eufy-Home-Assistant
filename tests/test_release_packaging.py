@@ -61,6 +61,21 @@ class ReleasePackagingTest(unittest.TestCase):
         for occupied_port in (1984, 8554, 8555):
             self.assertNotRegex(config, rf"(?m)^\s+{occupied_port}/(?:tcp|udp):")
 
+    def test_addon_fails_build_without_current_sctp_runtime(self):
+        fetch_script = (ROOT / "bridge/fetch_deps.js").read_text()
+        oracle = (ROOT / "bridge/sctp_oracle.js").read_text()
+        dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
+        run_script = (ROOT / "eufy_nvr/run.sh").read_text()
+
+        for content in (fetch_script, oracle, dockerfile, run_script):
+            self.assertIn("0_0_2", content)
+            self.assertNotIn("0_0_1", content)
+
+        self.assertIn("workerFailures", fetch_script)
+        self.assertIn("process.exitCode = 1", fetch_script)
+        self.assertNotIn("fetch_deps.js ||", dockerfile)
+        self.assertIn("node sctp_oracle.js selftest", dockerfile)
+
 
 if __name__ == "__main__":
     unittest.main()

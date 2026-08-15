@@ -226,8 +226,9 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.6.1:** uses dedicated add-on ports (`1985` API, `8556` RTSP, `8557` WebRTC) so Home Assistant's
-built-in go2rtc cannot be mistaken for the Eufy service. The setup flow now identifies that wrong-instance case.
+**v0.6.2:** uses eufy's current SCTP framing runtime and rejects broken add-on images during the build.
+It retains the dedicated add-on ports (`1985` API, `8556` RTSP, `8557` WebRTC) so Home Assistant's
+built-in go2rtc cannot be mistaken for the Eufy service.
 
 **v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,

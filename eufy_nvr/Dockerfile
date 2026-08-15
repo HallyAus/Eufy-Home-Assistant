@@ -64,7 +64,7 @@ RUN if [ ! -e /usr/bin/python ]; then ln -s /usr/bin/python3 /usr/bin/python; fi
 # keeps the image reproducible; bump on release.
 # ---------------------------------------------------------------------------
 ARG REPO_URL="https://github.com/HallyAus/Eufy-Home-Assistant"
-ARG REPO_REF="v0.6.1"
+ARG REPO_REF="v0.6.2"
 RUN git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" /tmp/repo \
     && mkdir -p /opt/eufy \
     && cp -r /tmp/repo/bridge /opt/eufy/bridge \
@@ -81,7 +81,10 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt paho
 #   - eufy libsctp WASM + worker shims  -> bridge/worker/   (from eufy's public CDN)
 #   - ffmpeg is already installed above; fetch_deps will detect it on PATH and skip it
 # We fetch go2rtc EXPLICITLY (pinned) below rather than via fetch_deps' "latest".
-RUN node fetch_deps.js || echo "fetch_deps.js: non-fatal failures (go2rtc fetched separately below)"
+RUN node fetch_deps.js \
+    && test -s worker/libsctp_0_0_2.js \
+    && test -s worker/libsctp_0_0_2.wasm \
+    && node sctp_oracle.js selftest
 
 # go2rtc: pinned download straight from the release tag, into bridge/bin/go2rtc.
 # Map Docker/Debian arch -> go2rtc release asset name.

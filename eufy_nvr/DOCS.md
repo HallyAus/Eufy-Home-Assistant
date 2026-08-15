@@ -90,9 +90,10 @@ HA), so these ports are opened directly on the host.
   trigger a temporary lockout (retry after ~24h).
 - **"Discovery failed" / streams never start** — confirm `region` matches your account (US/EU/IE). If
   auto-discovery can't find the NVR, set `station_sn` to your NVR's serial explicitly.
-- **`libsctp_*.wasm is missing` warning** — eufy bumped the libsctp version; the build's
-  `fetch_deps.js` couldn't grab the matching worker files. Update the versions in
-  `bridge/fetch_deps.js` + `bridge/sctp_oracle.js` and rebuild.
+- **Image build fails at `fetch_deps` or the SCTP self-test** — eufy changed or removed the framing
+  runtime. Match `SCTP_VERSION` in `bridge/fetch_deps.js` + `bridge/sctp_oracle.js` to the web
+  client's current `versionControl.verLibsctp`, then rebuild. The add-on deliberately refuses to
+  install an image that cannot frame NVR traffic.
 - **No video but discovery worked** — raise `log_level` to `debug`, restart, and check the log for the
   go2rtc `exec` line failing (python/ffmpeg/node path) or a non-200 from `ws/sign`.
 
