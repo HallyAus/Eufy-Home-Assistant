@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.6
+
+- Start the video stream shortly after the NVR acknowledges `openLive` instead of waiting a fixed
+  second, leaving enough time for Home Assistant to decode the first JPEG within its request limit.
+
 ## 0.6.5
 
 - Skip ffmpeg's unnecessary input analysis for the known raw HEVC camera feed. This removes several

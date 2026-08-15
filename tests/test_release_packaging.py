@@ -87,6 +87,8 @@ class ReleasePackagingTest(unittest.TestCase):
         stream_script = (ROOT / "bridge/eufy_stream.py").read_text()
 
         self.assertIn('"-probesize", "32", "-analyzeduration", "0"', stream_script)
+        self.assertIn("await asyncio.sleep(0.15)", stream_script)
+        self.assertNotIn("await asyncio.sleep(1.0)", stream_script)
 
 
 if __name__ == "__main__":

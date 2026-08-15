@@ -398,7 +398,9 @@ async def main():
         ol = build_openlive(USER_ID, CHANNELS)
         log(f"-> openLive (1103) len={len(ol)} channels={CHANNELS}")
         oracle.push_send(1, ol)
-        await asyncio.sleep(1.0)
+        # The NVR acknowledges openLive in tens of milliseconds. A short guard
+        # is sufficient and keeps cold starts inside HA's image timeout.
+        await asyncio.sleep(0.15)
         ss = build_startstream(USER_ID, CHANNELS, stream_id=1)
         log(f"-> startStream (1003) len={len(ss)} streamId=1  [THE video trigger]")
         oracle.push_send(1, ss)
