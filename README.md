@@ -226,10 +226,11 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.6.4:** uses eufy's current SCTP framing runtime and rejects broken add-on images during the build.
+**v0.6.5:** uses eufy's current SCTP framing runtime and rejects broken add-on images during the build.
 It retains the dedicated add-on ports (`1985` API, `8556` RTSP, `8557` WebRTC) so Home Assistant's
 built-in go2rtc cannot be mistaken for the Eufy service, and falls back to Home Assistant's configured
-LAN host when `homeassistant.local` does not resolve inside the Core container.
+LAN host when `homeassistant.local` does not resolve inside the Core container. Known-format ffmpeg
+input skips redundant probing so cold camera images fit Home Assistant's 10-second request window.
 
 **v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,

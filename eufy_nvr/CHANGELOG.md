@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5
+
+- Skip ffmpeg's unnecessary input analysis for the known raw HEVC camera feed. This removes several
+  seconds from a cold stream launch so Home Assistant can receive a still before its fixed 10-second
+  camera-image timeout.
+
 ## 0.6.4
 
 - When `homeassistant.local` is unreachable from the Home Assistant Core container, retry the

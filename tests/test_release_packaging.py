@@ -83,6 +83,11 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("sed 's/^[[:space:]]*//'", run_script)
         self.assertNotIn("tr -d '[:space:]'", run_script)
 
+    def test_known_hevc_input_skips_ffmpeg_probe_delay(self):
+        stream_script = (ROOT / "bridge/eufy_stream.py").read_text()
+
+        self.assertIn('"-probesize", "32", "-analyzeduration", "0"', stream_script)
+
 
 if __name__ == "__main__":
     unittest.main()

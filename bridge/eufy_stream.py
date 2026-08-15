@@ -297,6 +297,10 @@ async def main():
             _codec_label = "H.264 (transcoded)"
         ffmpeg_proc = await asyncio.create_subprocess_exec(
             FFMPEG, "-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer",
+            # The input format is known, so probing only delays go2rtc publication.
+            # HA's camera proxy has a hard 10-second image timeout and the NVR's
+            # WebRTC handshake already consumes most of it on a cold start.
+            "-probesize", "32", "-analyzeduration", "0",
             "-f", "hevc", "-r", "25", "-i", "pipe:",
             *vcodec, "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
