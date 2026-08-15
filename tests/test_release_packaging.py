@@ -76,6 +76,13 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertNotIn("fetch_deps.js ||", dockerfile)
         self.assertIn("node sctp_oracle.js selftest", dockerfile)
 
+    def test_keep_warm_preserves_one_stream_per_line(self):
+        run_script = (ROOT / "eufy_nvr/run.sh").read_text()
+
+        self.assertIn("mapfile -t streams", run_script)
+        self.assertIn("sed 's/^[[:space:]]*//'", run_script)
+        self.assertNotIn("tr -d '[:space:]'", run_script)
+
 
 if __name__ == "__main__":
     unittest.main()

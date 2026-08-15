@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+- Preserve line boundaries when parsing discovered stream names for `keep_warm`, so each camera gets
+  its own warmer instead of all stream slugs being concatenated into one invalid RTSP path.
+
 ## 0.6.2
 
 - Update eufy's required SCTP framing runtime from removed `0_0_1` CDN assets to the current

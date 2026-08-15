@@ -226,7 +226,7 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.6.2:** uses eufy's current SCTP framing runtime and rejects broken add-on images during the build.
+**v0.6.3:** uses eufy's current SCTP framing runtime and rejects broken add-on images during the build.
 It retains the dedicated add-on ports (`1985` API, `8556` RTSP, `8557` WebRTC) so Home Assistant's
 built-in go2rtc cannot be mistaken for the Eufy service.
 
