@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.5.2"
+version: "0.6.0"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
@@ -9,15 +9,13 @@ arch:
 init: false
 # "application" = long-running service that HA keeps up; pairs with the watchdog below.
 startup: application
-boot: manual
+boot: auto
 
 # host_network is REQUIRED: the engine talks LAN-direct to the NVR (WebRTC media + UDP), and
-# go2rtc must be reachable on the HA host itself at rtsp://127.0.0.1:8554 by the Generic Camera /
-# HA's own go2rtc. With host_network the ports below are informational (no NAT is applied), but we
+# go2rtc must be reachable on the HA host's LAN address by HA Core / Generic Camera.
+# With host_network the ports below are informational (no NAT is applied), but we
 # keep them so the Supervisor UI documents what the add-on opens.
 host_network: true
-hassio_api: true
-homeassistant_api: true
 
 # Watchdog: Supervisor pings this TCP endpoint; if go2rtc's API stops answering, the add-on is
 # restarted. run.sh ALSO has its own supervise loop (restart-on-crash) so transient engine
@@ -35,7 +33,7 @@ ports:
   8555/tcp: 8555
   8555/udp: 8555
 ports_description:
-  8554/tcp: RTSP (HA pulls cameras from rtsp://127.0.0.1:8554/eufy_<name>)
+  8554/tcp: RTSP (HA pulls cameras from rtsp://<HA-LAN-IP>:8554/eufy_<name>)
   1984/tcp: go2rtc API / web UI (also the watchdog endpoint)
   8555/tcp: WebRTC (TCP candidate)
   8555/udp: WebRTC (UDP candidate)

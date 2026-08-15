@@ -14,6 +14,7 @@ import asyncio, json, time, uuid, os, sys, hashlib, random, re, base64, struct
 
 import aiohttp
 import websockets
+import eufy_cloud as ec
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration
 from aiortc.sdp import candidate_from_sdp
 import logging
@@ -43,6 +44,7 @@ def _bin(name):
 
 AUTH = json.load(open(os.environ.get("EUFY_AUTH", os.path.join(ROOT, "auth.json"))))
 STATION_SN = os.environ.get("EUFY_STATION_SN") or AUTH.get("stationSn") or ""
+REGION = os.environ.get("EUFY_REGION") or AUTH.get("region") or "US"
 
 def _decrypt_user_id():
     if AUTH.get("userId"):
@@ -73,8 +75,7 @@ NODE = _bin("node")
 ORACLE = os.path.join(ROOT, "sctp_oracle.js")
 FFMPEG = _bin("ffmpeg")
 
-WS_URL = "wss://security-smart.eufylife.com/v1/rtc/ws/join?reqtype=nvr"
-SIGN_URL = f"https://security-smart.eufylife.com/v1/smart/nvr/ws/sign?station_sn={STATION_SN}"
+WS_URL, SIGN_URL = ec.smart_urls(STATION_SN, REGION)
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
 HEADERS = {
     "x-auth-token": AUTH["authToken"], "gtoken": AUTH["gtoken"],

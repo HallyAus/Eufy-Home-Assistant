@@ -5,26 +5,25 @@ they reachable". The camera platform listens to it: when go2rtc gains a new
 ``eufy_*`` stream the coordinator picks it up and the platform adds a new camera
 entity automatically — no YAML, no re-config.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any
 
-from aiohttp import ClientError, ClientResponseError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
-    API_STREAMS_PATH,
     CONF_API_PORT,
     CONF_HOST,
     DOMAIN,
     REQUEST_TIMEOUT,
-    STREAM_PREFIX,
     UPDATE_INTERVAL,
 )
+from .go2rtc_api import Go2RtcClient, Go2RtcError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,10 +40,14 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Initialise the coordinator from a config entry."""
-        self.host: str = entry.data[CONF_HOST]
-        self.api_port: int = entry.data[CONF_API_PORT]
-        self._session = async_get_clientsession(hass)
-        self._url = f"http://{self.host}:{self.api_port}{API_STREAMS_PATH}"
+        self._client = Go2RtcClient(
+            async_get_clientsession(hass),
+            entry.data[CONF_HOST],
+            entry.data[CONF_API_PORT],
+            REQUEST_TIMEOUT,
+        )
+        self.host = self._client.host
+        self.api_port = self._client.api_port
 
         super().__init__(
             hass,
@@ -61,46 +64,14 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         dependent entity unavailable until go2rtc is reachable again.
         """
         try:
-            async with self._session.get(
-                self._url, timeout=REQUEST_TIMEOUT
-            ) as resp:
-                resp.raise_for_status()
-                payload = await resp.json(content_type=None)
-        except ClientResponseError as err:
-            raise UpdateFailed(
-                f"go2rtc returned HTTP {err.status} from {self._url}"
-            ) from err
-        except (ClientError, TimeoutError) as err:
-            raise UpdateFailed(
-                f"Cannot reach go2rtc at {self._url}: {err}"
-            ) from err
-        except ValueError as err:  # invalid JSON
-            raise UpdateFailed(
-                f"go2rtc returned invalid JSON from {self._url}: {err}"
-            ) from err
-
-        # go2rtc's /api/streams returns a dict keyed by stream name. Some builds
-        # wrap it as {"streams": {...}}; tolerate both shapes.
-        if isinstance(payload, dict) and "streams" in payload and isinstance(
-            payload["streams"], dict
-        ):
-            payload = payload["streams"]
-
-        if not isinstance(payload, dict):
-            raise UpdateFailed(
-                f"Unexpected go2rtc /api/streams shape: {type(payload).__name__}"
-            )
-
-        streams: dict[str, dict[str, Any]] = {
-            name: (info if isinstance(info, dict) else {})
-            for name, info in payload.items()
-            if isinstance(name, str) and name.startswith(STREAM_PREFIX)
-        }
+            streams = await self._client.async_get_streams()
+        except Go2RtcError as err:
+            raise UpdateFailed(str(err)) from err
 
         _LOGGER.debug(
             "Discovered %d eufy stream(s) from %s: %s",
             len(streams),
-            self._url,
+            self._client.url,
             ", ".join(sorted(streams)) or "(none)",
         )
         return streams

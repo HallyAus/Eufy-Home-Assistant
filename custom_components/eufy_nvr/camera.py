@@ -4,6 +4,7 @@ Entities are created dynamically from the coordinator's stream list. A listener
 on the coordinator adds entities for streams that appear after setup, so plugging
 in / enabling another NVR channel surfaces a new camera without any user action.
 """
+
 from __future__ import annotations
 
 import logging
@@ -24,16 +25,16 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     MODEL,
-    STREAM_PREFIX,
 )
 from .coordinator import EufyNvrCoordinator
+from .go2rtc_api import STREAM_PREFIX, rtsp_url, stream_summary
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def _friendly_name(stream: str) -> str:
     """Turn a stream name into a human label: ``eufy_front_gate`` -> ``Front Gate``."""
-    base = stream[len(STREAM_PREFIX):] if stream.startswith(STREAM_PREFIX) else stream
+    base = stream[len(STREAM_PREFIX) :] if stream.startswith(STREAM_PREFIX) else stream
     return base.replace("_", " ").strip().title() or stream
 
 
@@ -86,7 +87,7 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
         Camera.__init__(self)
 
         self._stream = stream
-        self._stream_source = f"rtsp://{host}:{rtsp_port}/{stream}"
+        self._stream_source = rtsp_url(host, rtsp_port, stream)
 
         self._attr_name = _friendly_name(stream)
         # Stable across host/port edits so history/automations survive a reconfig.
@@ -121,7 +122,8 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose the stream name and source for diagnostics."""
+        info = (self.coordinator.data or {}).get(self._stream, {})
         return {
             "stream_name": self._stream,
-            "stream_source": self._stream_source,
+            **stream_summary(info),
         }

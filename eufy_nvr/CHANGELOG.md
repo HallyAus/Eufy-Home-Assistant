@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0
+
+- Fix discovery and streaming for EU and IE accounts by routing `ws/sign` and the signaling WebSocket
+  through the selected region's smart-service host. Headless and browser-captured auth files now persist
+  the signaling region so manual bridge commands work without re-exporting `EUFY_REGION`.
+- Rebuild the companion integration around a shared go2rtc client, with normalized IPv4/IPv6 endpoints,
+  a distinct "bridge reachable but no Eufy streams" setup error, live producer/consumer attributes, and
+  privacy-safe downloadable diagnostics.
+- Persist `auth.json`, camera discovery, and generated go2rtc configuration under the add-on `/data`
+  directory. A transient login or discovery outage can reuse the last working local configuration.
+- Start the add-on automatically after a host reboot and remove unused Supervisor/Home Assistant API
+  permissions.
+- Pin the bridge source used by the add-on image to the matching `v0.6.0` release instead of mutable `main`.
+
 ## 0.5.2
 
 - **More login regions + a separate account country.** The `region` option now offers

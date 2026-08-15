@@ -6,6 +6,7 @@ go2rtc which ``eufy_*`` streams exist and exposes each as a Home Assistant camer
 grouped under a single "Eufy NVR" device. New cameras appear automatically as the
 bridge publishes them — there is nothing to configure per camera.
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,7 +15,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
 from .coordinator import EufyNvrCoordinator
 
 _LOGGER = logging.getLogger(__name__)

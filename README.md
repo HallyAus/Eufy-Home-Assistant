@@ -29,6 +29,10 @@ cameras into **Home Assistant** — as a standard RTSP/WebRTC stream you can dro
 No eufy cloud relay for the video. No Frigate. No flashing the cameras. Just Home Assistant's built-in
 **go2rtc** and a small bridge that speaks the NVR's (previously undocumented) WebRTC protocol.
 
+> **The physical NVR remains part of this design.** The PoE cameras use an encrypted proprietary link to
+> the NVR and do not expose usable RTSP/ONVIF endpoints themselves. This project makes the NVR-delivered
+> camera feeds locally accessible; it does not replace or reflash the NVR.
+
 > ⚠️ This is independent interoperability/reverse-engineering work for use with **your own** hardware. It is not
 > affiliated with or endorsed by Anker/eufy. Use it on devices you own.
 
@@ -118,7 +122,7 @@ Runs everything on your HA host; no always-on PC and no token paste.
    and downloads go2rtc.)
 3. **Configuration** tab → enter your eufy account:
    - `email` / `password` — your eufy login
-   - `region` — `US` or `EU`
+   - `region` — `US`, `EU`, or `IE` (the eufy server region that holds your account)
    - `log_level` — `info` (raise to `debug` only when troubleshooting)
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
@@ -127,7 +131,8 @@ Runs everything on your HA host; no always-on PC and no token paste.
 
 Your password is passed only via the environment, scrubbed right after login, and never printed to the log.
 
-Then add the **companion integration** (below) to get camera entities — for the add-on use host **`127.0.0.1`**.
+Then add the **companion integration** (below) to get camera entities — for the add-on use your **HA host's
+LAN IP**, not `127.0.0.1`.
 
 ---
 
@@ -219,7 +224,11 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**Released (v0.4.0):** LAN-direct connect, `startStream`, libsctp reassembly, H.265 extraction, sustained
+**Next (v0.6.0):** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
+setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,
+and reproducible version-pinned add-on builds. It also includes region-aware signaling for US/EU/IE accounts.
+
+**Released (v0.5.2):** LAN-direct connect, `startStream`, libsctp reassembly, H.265 extraction, sustained
 ~18–25 fps 1080p, served as RTSP via go2rtc, with **auto-discovery** of the NVR + cameras (channels 0–3),
 **headless email/password login**, a **HA add-on**, and a **companion auto-discovery integration**.
 

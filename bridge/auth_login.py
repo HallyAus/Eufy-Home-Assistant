@@ -106,6 +106,7 @@ async def main() -> int:
         "gtoken": gtoken,
         "userId": user_id,
         "stationSn": station_sn,
+        "region": region,
         "webCountry": country,
         "appName": "eufy_mega",
     }

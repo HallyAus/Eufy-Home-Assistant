@@ -2,13 +2,13 @@
 # =============================================================================
 # Eufy NVR Local — add-on entrypoint
 #
-#   1. Build auth.json from the add-on options (one-time session token, v0.3).
+#   1. Refresh auth.json from the add-on options, with persistent-cache fallback.
 #   2. Auto-discover the NVR + cameras (cmd 9100) -> cameras.json.
 #   3. Generate go2rtc.yaml from the discovered cameras.
 #   4. Run go2rtc under a supervise loop (restart-on-crash with backoff).
 #
 # go2rtc binds RTSP :8554 / API :1984 / WebRTC :8555 on the HOST network, so HA
-# (same host) reaches the cameras at rtsp://127.0.0.1:8554/eufy_<name> and the
+# reaches the cameras through the HA host's LAN address, while internal warmers use loopback. The
 # Supervisor watchdog can poll tcp://[HOST]:1984.
 # =============================================================================
 set -o errexit
@@ -16,6 +16,9 @@ set -o nounset
 set -o pipefail
 
 BRIDGE_DIR="/opt/eufy/bridge"
+STATE_DIR="/data"
+CONFIG_PATH="${STATE_DIR}/go2rtc.yaml"
+mkdir -p "${STATE_DIR}"
 cd "${BRIDGE_DIR}"
 
 # --- map the add-on log_level option onto go2rtc's log level -----------------
@@ -38,7 +41,7 @@ fi
 export EUFY_EMAIL="$(bashio::config 'email')"
 export EUFY_PASSWORD="$(bashio::config 'password')"
 export EUFY_REGION="$(bashio::config 'region' 'US')"
-export EUFY_AUTH="${BRIDGE_DIR}/auth.json"
+export EUFY_AUTH="${STATE_DIR}/auth.json"
 if bashio::config.has_value 'country'; then export EUFY_COUNTRY="$(bashio::config 'country')"; fi
 if bashio::config.has_value 'station_sn'; then export EUFY_STATION_SN="$(bashio::config 'station_sn')"; fi
 if bashio::config.has_value 'captcha_id'; then export EUFY_CAPTCHA_ID="$(bashio::config 'captcha_id')"; fi
@@ -46,16 +49,22 @@ if bashio::config.has_value 'captcha_answer'; then export EUFY_CAPTCHA_ANSWER="$
 
 umask 077
 if ! python3 auth_login.py; then
-    bashio::log.fatal "Headless login failed. Verify email / password / region. If the log above shows"
-    bashio::log.fatal "a CAPTCHA, set captcha_id + captcha_answer in the add-on options and restart."
-    rm -f "${BRIDGE_DIR}/auth.json"
-    unset EUFY_PASSWORD
-    sleep 15
-    exit 1
+    if [ -s "${EUFY_AUTH}" ]; then
+        bashio::log.warning "Fresh login failed; retaining the cached auth session for local startup."
+        bashio::log.warning "Verify region/country or CAPTCHA settings before the cached session expires."
+    else
+        bashio::log.fatal "Headless login failed and no cached session exists. Verify email / password / region."
+        bashio::log.fatal "If the log above shows a CAPTCHA, set captcha_id + captcha_answer and restart."
+        unset EUFY_PASSWORD
+        sleep 15
+        exit 1
+    fi
+else
+    bashio::log.info "Logged in; refreshed auth.json (region $(bashio::config 'region' 'US'))."
 fi
 unset EUFY_PASSWORD
-chmod 600 "${BRIDGE_DIR}/auth.json" 2>/dev/null || true
-bashio::log.info "Logged in; wrote auth.json (region $(bashio::config 'region' 'US')). Credentials kept out of logs."
+chmod 600 "${EUFY_AUTH}" 2>/dev/null || true
+bashio::log.info "Credentials kept out of logs; runtime state is persisted under /data."
 
 # Sanity-check the worker WASM the SCTP oracle needs (fetched at build time).
 if [ ! -f "${BRIDGE_DIR}/worker/libsctp_0_0_1.wasm" ]; then
@@ -80,6 +89,10 @@ discover_and_generate() {
         if python3 eufy_stream.py --discover; then
             bashio::log.info "Discovery OK -> cameras.json"
             if python3 gen_go2rtc.py "127.0.0.1"; then
+                install -m 600 "${BRIDGE_DIR}/go2rtc.yaml" "${CONFIG_PATH}"
+                if [ -f "${BRIDGE_DIR}/cameras.json" ]; then
+                    install -m 600 "${BRIDGE_DIR}/cameras.json" "${STATE_DIR}/cameras.json"
+                fi
                 bashio::log.info "Generated go2rtc.yaml from discovered cameras."
                 return 0
             fi
@@ -93,11 +106,11 @@ discover_and_generate() {
 }
 
 if ! discover_and_generate; then
-    if [ -f "${BRIDGE_DIR}/go2rtc.yaml" ]; then
+    if [ -f "${CONFIG_PATH}" ]; then
         bashio::log.warning "Discovery failed but a previous go2rtc.yaml exists — starting with it."
     else
         bashio::log.fatal "Could not discover cameras and no cached go2rtc.yaml is present. Aborting."
-        bashio::log.fatal "Most common cause: an expired session token. Re-run get_auth.js and re-paste."
+        bashio::log.fatal "Check the ws/sign status above. Common causes are a mismatched region or rejected session token."
         sleep 15
         exit 1
     fi
@@ -105,12 +118,12 @@ fi
 
 # Inject the operator's chosen log level into the generated config (gen_go2rtc hardcodes 'info').
 if command -v sed >/dev/null 2>&1; then
-    sed -i "s/^  level: .*/  level: ${LOG_LEVEL}/" "${BRIDGE_DIR}/go2rtc.yaml" || true
+    sed -i "s/^  level: .*/  level: ${LOG_LEVEL}/" "${CONFIG_PATH}" || true
 fi
 
 bashio::log.info "Discovered streams:"
 # List only the stream slugs (the lines under 'streams:'), never the exec command/secrets.
-grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${BRIDGE_DIR}/go2rtc.yaml" | sed 's/:.*$//' | sed 's/^/    /' || true
+grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${CONFIG_PATH}" | sed 's/:.*$//' | sed 's/^/    /' || true
 
 # -----------------------------------------------------------------------------
 # Optional raw H.265 passthrough (video_copy=true): lower CPU, but the browser
@@ -138,7 +151,7 @@ RELOGIN_PID=""
 
 start_warmers() {
     local s streams i=0
-    mapfile -t streams < <(grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${BRIDGE_DIR}/go2rtc.yaml" \
+    mapfile -t streams < <(grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${CONFIG_PATH}" \
         | grep -v 'offline at discovery' | sed 's/:.*$//' | tr -d '[:space:]')
     if [ "${#streams[@]}" -eq 0 ]; then
         bashio::log.warning "keep-warm: no online streams in go2rtc.yaml; nothing to warm."
@@ -171,7 +184,7 @@ start_relogin_timer() {
         sleep "$(( hours * 3600 ))"
         bashio::log.info "Refreshing eufy auth token (periodic, every ${hours}h)..."
         if EUFY_PASSWORD="$(bashio::config 'password')" python3 auth_login.py >/dev/null 2>&1; then
-            chmod 600 "${BRIDGE_DIR}/auth.json" 2>/dev/null || true
+            chmod 600 "${EUFY_AUTH}" 2>/dev/null || true
             bashio::log.info "auth.json refreshed."
         else
             bashio::log.warning "Periodic token refresh failed; will retry next cycle."
@@ -203,7 +216,7 @@ while true; do
     started=$(date +%s)
 
     # Run in the background so the trap can forward SIGTERM promptly during HA shutdown.
-    ./bin/go2rtc -config go2rtc.yaml &
+    ./bin/go2rtc -config "${CONFIG_PATH}" &
     GO2RTC_PID=$!
 
     # Start warmers + token refresher once. They self-heal across go2rtc restarts (the warmer

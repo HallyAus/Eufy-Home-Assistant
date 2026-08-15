@@ -21,9 +21,16 @@ const fs = require("fs");
     const u = r.url();
     if (/\/v1\/smart\/nvr\/ws\/sign/.test(u)) {
       const h = r.headers();
-      let sn = null; try { sn = new URL(u).searchParams.get("station_sn"); } catch {}
+      let sn = null;
+      let region = "us-pr";
+      try {
+        const parsed = new URL(u);
+        sn = parsed.searchParams.get("station_sn");
+        if (parsed.hostname === "security-smart-eu.eufylife.com") region = "eu-pr";
+        if (parsed.hostname === "security-smart-ie.eufylife.com") region = "ie-pr";
+      } catch {}
       out = { authToken: h["x-auth-token"], gtoken: h["gtoken"], webCountry: h["web-country"] || "US",
-              appName: h["app-name"] || "eufy_mega", stationSn: sn };
+              appName: h["app-name"] || "eufy_mega", stationSn: sn, region };
     }
   });
 

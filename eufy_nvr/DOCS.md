@@ -5,10 +5,10 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** Container + engine + auto-discovery + supervise/restart are production-grade.
-> **v0.4 adds headless email/password login** — no more one-time token paste. A companion HACS
-> integration, **"Eufy NVR (local)"**, auto-creates the camera entities from the bridge's go2rtc;
-> install it separately from this repo.
+> **Status: experimental.** v0.6 adds persistent recovery state, automatic host-reboot startup,
+> region-aware signaling, and a rebuilt companion integration with diagnostics. The HACS integration,
+> **"Eufy NVR (local)"**, auto-creates the camera entities from the bridge's go2rtc; install it
+> separately from this repo.
 
 ## What it runs
 
@@ -27,7 +27,8 @@ cloud; the video itself is pulled LAN-direct from the NVR.
 3. **Configuration tab** of the add-on — enter your eufy account and region:
    - `email`     -> your eufy account email
    - `password`  -> your eufy account password
-   - `region`    -> `US` or `EU`
+   - `region`    -> `US`, `EU`, or `IE` (the eufy server region holding the account)
+   - `country`   -> optional real account country such as `AU` or `GB`; leave blank to use `region`
    - `log_level` -> `info` (raise to `debug` only when troubleshooting)
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
@@ -46,14 +47,14 @@ cloud; the video itself is pulled LAN-direct from the NVR.
 
 On the HA host the add-on serves:
 
-- RTSP: `rtsp://127.0.0.1:8554/eufy_<camera>`
+- RTSP: `rtsp://<HA-LAN-IP>:8554/eufy_<camera>`
 - go2rtc UI / API: `http://<ha-ip>:1984/`
 
 Stream names are slugified from your camera names (e.g. "Garage" -> `eufy_garage`); the exact list is
 printed in the add-on log and shown in the go2rtc UI. To surface them as camera entities, either:
 
 - install the companion **"Eufy NVR (local)"** HACS integration (auto-creates one camera per stream), or
-- use the **Generic Camera** integration -> *Stream Source* `rtsp://127.0.0.1:8554/eufy_garage`, or
+- use the **Generic Camera** integration -> *Stream Source* `rtsp://<HA-LAN-IP>:8554/eufy_garage`, or
 - add them to HA's own `/config/go2rtc.yaml` and reference from a `camera:` / WebRTC card.
 
 Streams are **on-demand**: the engine only connects to the NVR while something is actually pulling a
@@ -74,6 +75,9 @@ HA), so these ports are opened directly on the host.
 
 - **Supervisor watchdog** polls `tcp://[HOST]:1984`; if go2rtc's API stops answering, the container
   is restarted automatically.
+- **Persistent recovery state** keeps the last successful auth session, discovery result, and generated
+  go2rtc configuration in `/data`, so a transient cloud/login outage does not erase a working local setup.
+- **Automatic boot** brings the bridge back after a Home Assistant host restart.
 - **In-process supervise loop** in `run.sh` restarts go2rtc on a plain crash with exponential backoff
   (2s -> 60s cap), recovering faster than a full container bounce and without hammering the NVR.
 - A Docker `HEALTHCHECK` hits the same API endpoint.
@@ -84,7 +88,7 @@ HA), so these ports are opened directly on the host.
 - **"Headless login failed"** — check email / password / region. If the log shows a **CAPTCHA**, set
   `captcha_id` + `captcha_answer` from the log and restart. A wrong password several times in a row can
   trigger a temporary lockout (retry after ~24h).
-- **"Discovery failed" / streams never start** — confirm `region` matches your account (US/EU). If
+- **"Discovery failed" / streams never start** — confirm `region` matches your account (US/EU/IE). If
   auto-discovery can't find the NVR, set `station_sn` to your NVR's serial explicitly.
 - **`libsctp_*.wasm is missing` warning** — eufy bumped the libsctp version; the build's
   `fetch_deps.js` couldn't grab the matching worker files. Update the versions in

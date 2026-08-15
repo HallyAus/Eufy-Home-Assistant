@@ -5,18 +5,16 @@ automatically afterwards by the coordinator — no channel names, no per-camera
 entry. The flow validates that go2rtc's REST API answers before creating the
 entry, so misconfiguration is caught immediately.
 """
+
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import voluptuous as vol
-from aiohttp import ClientError
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
-    API_STREAMS_PATH,
     CONF_API_PORT,
     CONF_HOST,
     CONF_RTSP_PORT,
@@ -25,44 +23,36 @@ from .const import (
     DEFAULT_RTSP_PORT,
     DOMAIN,
     REQUEST_TIMEOUT,
-    STREAM_PREFIX,
 )
+from .go2rtc_api import Go2RtcClient, Go2RtcError
 
-_LOGGER = logging.getLogger(__name__)
 
+async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
+    """Probe go2rtc and return its normalized host and Eufy stream count.
 
-async def _validate_go2rtc(hass, host: str, api_port: int) -> int:
-    """Probe go2rtc's /api/streams. Return the eufy_* stream count.
-
-    Raises ``CannotConnect`` if go2rtc cannot be reached or replies with an error.
+    Distinguishes bad input, an unreachable API, and a reachable bridge that has
+    not published any Eufy cameras yet so the setup form can be actionable.
     """
-    session = async_get_clientsession(hass)
-    url = f"http://{host}:{api_port}{API_STREAMS_PATH}"
     try:
-        async with session.get(url, timeout=REQUEST_TIMEOUT) as resp:
-            resp.raise_for_status()
-            payload = await resp.json(content_type=None)
-    except (ClientError, TimeoutError, ValueError) as err:
-        _LOGGER.debug("go2rtc validation failed for %s: %s", url, err)
+        client = Go2RtcClient(
+            async_get_clientsession(hass), host, api_port, REQUEST_TIMEOUT
+        )
+    except ValueError as err:
+        raise InvalidEndpoint from err
+    try:
+        streams = await client.async_get_streams()
+    except Go2RtcError as err:
         raise CannotConnect from err
-
-    if isinstance(payload, dict) and isinstance(payload.get("streams"), dict):
-        payload = payload["streams"]
-    if not isinstance(payload, dict):
-        raise CannotConnect
-
-    return sum(
-        1 for name in payload if isinstance(name, str) and name.startswith(STREAM_PREFIX)
-    )
+    if not streams:
+        raise NoStreams
+    return client.host, len(streams)
 
 
 def _schema(defaults: dict[str, Any]) -> vol.Schema:
     """Build the form schema with the given defaults."""
     return vol.Schema(
         {
-            vol.Required(
-                CONF_HOST, default=defaults.get(CONF_HOST, DEFAULT_HOST)
-            ): str,
+            vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, DEFAULT_HOST)): str,
             vol.Required(
                 CONF_API_PORT, default=defaults.get(CONF_API_PORT, DEFAULT_API_PORT)
             ): int,
@@ -85,20 +75,22 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = user_input[CONF_HOST].strip()
+            host = user_input[CONF_HOST]
             api_port = user_input[CONF_API_PORT]
             rtsp_port = user_input[CONF_RTSP_PORT]
 
-            # One entry per go2rtc API endpoint.
-            await self.async_set_unique_id(f"{host}:{api_port}")
-            self._abort_if_unique_id_configured()
-
             try:
-                count = await _validate_go2rtc(self.hass, host, api_port)
+                host, _ = await _validate_go2rtc(self.hass, host, api_port)
+            except InvalidEndpoint:
+                errors["base"] = "invalid_endpoint"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except NoStreams:
+                errors["base"] = "no_streams"
             else:
-                _LOGGER.debug("go2rtc at %s:%s exposes %d eufy stream(s)", host, api_port, count)
+                # One entry per normalized go2rtc API endpoint.
+                await self.async_set_unique_id(f"{host}:{api_port}")
+                self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title=f"Eufy NVR ({host})",
                     data={
@@ -122,12 +114,16 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            host = user_input[CONF_HOST].strip()
+            host = user_input[CONF_HOST]
             api_port = user_input[CONF_API_PORT]
             try:
-                await _validate_go2rtc(self.hass, host, api_port)
+                host, _ = await _validate_go2rtc(self.hass, host, api_port)
+            except InvalidEndpoint:
+                errors["base"] = "invalid_endpoint"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except NoStreams:
+                errors["base"] = "no_streams"
             else:
                 return self.async_update_reload_and_abort(
                     entry,
@@ -147,3 +143,11 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class CannotConnect(Exception):
     """Raised when go2rtc's REST API is unreachable."""
+
+
+class InvalidEndpoint(Exception):
+    """Raised when a host or port is invalid."""
+
+
+class NoStreams(Exception):
+    """Raised when go2rtc is reachable but has no Eufy streams."""

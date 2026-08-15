@@ -158,10 +158,28 @@ DEFAULT_TIMEOUT = 30
 _BACKEND = default_backend()
 
 
+def normalize_region(region: str) -> str:
+    """Normalize add-on values (``US``/``EU``/``IE``) to cloud table keys."""
+    normalized = (region or "us-pr").strip().lower()
+    if not normalized.endswith("-pr"):
+        normalized += "-pr"
+    return normalized
+
+
 def base_url(service: str, region: str) -> str:
     """fa(service, region) -- region->domain lookup with us-pr fallback."""
     table = DOMAINS.get(service, {})
-    return table.get(region) or table.get("us-pr") or ""
+    return table.get(normalize_region(region)) or table.get("us-pr") or ""
+
+
+def smart_urls(station_sn: str, region: str) -> Tuple[str, str]:
+    """Return the region-correct WebSocket and sign endpoints for an NVR."""
+    smart_base = base_url("smart", region).rstrip("/")
+    websocket_base = smart_base.replace("https://", "wss://", 1)
+    return (
+        f"{websocket_base}/v1/rtc/ws/join?reqtype=nvr",
+        f"{smart_base}/v1/smart/nvr/ws/sign?station_sn={station_sn}",
+    )
 
 
 # ====================================================================================
@@ -870,7 +888,8 @@ class EufyCloudError(RuntimeError):
 
 __all__ = [
     "DOMAINS", "APP_NAME", "EXCHANGE_BOOTSTRAP_KEY",
-    "base_url", "gen_keypair", "derive_share_key", "sign",
+    "normalize_region", "base_url", "smart_urls",
+    "gen_keypair", "derive_share_key", "sign",
     "aes_encrypt", "aes_decrypt", "KeyExchange", "RandomField",
     "ecdh_handshake", "encrypted_post",
     "station_list", "house_list", "device_list", "parse_stations",
