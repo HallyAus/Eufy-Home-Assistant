@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.7
+
+- Refresh the eufy auth session periodically even when `keep_warm` is disabled, and replace the auth
+  file atomically, so on-demand camera streams continue working after the original token expires.
+- Stop logging the `ws/sign` response body or token prefix, and report expired/rejected sessions with
+  an actionable error instead of an internal `KeyError`.
+
 ## 0.6.6
 
 - Start the video stream shortly after the NVR acknowledges `openLive` instead of waiting a fixed

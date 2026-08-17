@@ -152,8 +152,20 @@ def build_ping():
 async def get_sign_token():
     async with aiohttp.ClientSession() as s:
         async with s.get(SIGN_URL, headers=HEADERS) as r:
-            txt = await r.text(); log("ws/sign", r.status, txt[:120])
-            return json.loads(txt)["data"]
+            try:
+                body = await r.json(content_type=None)
+            except (aiohttp.ContentTypeError, json.JSONDecodeError) as exc:
+                log("ws/sign status", r.status, "returned a non-JSON response")
+                raise RuntimeError("ws/sign returned an invalid response") from exc
+
+            code = body.get("code") if isinstance(body, dict) else None
+            log("ws/sign status", r.status, "code", code)
+            sign_token = body.get("data") if isinstance(body, dict) else None
+            if r.status != 200 or not isinstance(sign_token, str) or not sign_token:
+                raise RuntimeError(
+                    "ws/sign rejected the current auth session; refresh auth.json or restart the add-on"
+                )
+            return sign_token
 
 def colonize(fp): return ":".join(fp[i:i+2] for i in range(0, len(fp), 2))
 
@@ -264,7 +276,7 @@ class Oracle:
 
 async def main():
     sign_token = await get_sign_token()
-    log("sign token:", sign_token[:20], "... station", STATION_SN, "channels", CHANNELS, "user_id", USER_ID[:8] + "..")
+    log("sign token acquired; channels", CHANNELS)
 
     oracle = Oracle(); await oracle.start()
 

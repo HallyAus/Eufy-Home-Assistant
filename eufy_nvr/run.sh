@@ -145,8 +145,8 @@ fi
 # producer (and its NVR WebRTC session) alive. With the H.264 transcode this is
 # one continuous software encode PER online camera, so it is off by default —
 # enable only on a host with CPU headroom (pair with video_copy for a cheap
-# warm). A periodic re-login refreshes auth.json so a dropped warmer reconnects
-# past the ~1-day eufy token; cadence via 'token_refresh_hours'.
+# warm). Periodic re-login is independent of keep-warm so on-demand streams can
+# reconnect past the ~1-day eufy token; cadence via 'token_refresh_hours'.
 # -----------------------------------------------------------------------------
 KEEP_WARM="$(bashio::config 'keep_warm' 'false')"
 WARM_PIDS=()
@@ -212,7 +212,7 @@ trap term SIGTERM SIGINT
 #    bounces the whole container if the API dies; this inner loop recovers faster
 #    from a plain crash and applies a capped backoff to avoid hammering the NVR.
 # -----------------------------------------------------------------------------
-WARMERS_STARTED=0
+BACKGROUND_TASKS_STARTED=0
 backoff=2
 while true; do
     bashio::log.info "Starting go2rtc (RTSP :${GO2RTC_RTSP_PORT}, WebRTC :${GO2RTC_WEBRTC_PORT}, API/UI :${GO2RTC_API_PORT}, log=${LOG_LEVEL})..."
@@ -222,12 +222,14 @@ while true; do
     ./bin/go2rtc -config "${CONFIG_PATH}" &
     GO2RTC_PID=$!
 
-    # Start warmers + token refresher once. They self-heal across go2rtc restarts (the warmer
-    # ffmpeg retries until go2rtc is back); start_warmers returns at once (stagger is in-warmer).
-    if [ "${WARMERS_STARTED}" -eq 0 ] && [ "${KEEP_WARM}" = 'true' ]; then
-        start_warmers
+    # Start the token refresher once for both on-demand and keep-warm operation. Warmers self-heal
+    # across go2rtc restarts; start_warmers returns immediately (stagger is inside each warmer).
+    if [ "${BACKGROUND_TASKS_STARTED}" -eq 0 ]; then
         start_relogin_timer
-        WARMERS_STARTED=1
+        if [ "${KEEP_WARM}" = 'true' ]; then
+            start_warmers
+        fi
+        BACKGROUND_TASKS_STARTED=1
     fi
 
     set +o errexit

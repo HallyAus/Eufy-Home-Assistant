@@ -21,6 +21,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import eufy_cloud as ec  # noqa: E402
@@ -81,7 +82,7 @@ async def main() -> int:
     auth_token = creds["auth_token"]
     gtoken = creds.get("gtoken", "")
     user_id = creds.get("user_id", "")
-    print(f"auth_login: login OK (user_id {user_id[:6]}..., token {len(auth_token)} chars)")
+    print("auth_login: login OK")
 
     # station_sn: explicit override wins; else discover it from the station list.
     station_sn = os.environ.get("EUFY_STATION_SN", "").strip()
@@ -96,7 +97,7 @@ async def main() -> int:
         print("auth_login: could not determine station_sn "
               "(set EUFY_STATION_SN to override)", file=sys.stderr)
         return 4
-    print(f"auth_login: station_sn {station_sn}")
+    print("auth_login: station selected")
 
     out_path = os.environ.get(
         "EUFY_AUTH",
@@ -111,12 +112,28 @@ async def main() -> int:
         "appName": "eufy_mega",
     }
     old = os.umask(0o077)
+    temp_path = None
     try:
-        with open(out_path, "w", encoding="utf-8") as fh:
+        # Producers may start while the periodic refresh is running. Write a complete file in the
+        # same directory, then atomically replace auth.json so readers never see partial JSON.
+        out_dir = os.path.dirname(os.path.abspath(out_path))
+        with tempfile.NamedTemporaryFile(
+                mode="w", encoding="utf-8", dir=out_dir,
+                prefix=".auth-", suffix=".tmp", delete=False) as fh:
+            temp_path = fh.name
             json.dump(auth, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(temp_path, out_path)
+        temp_path = None
     finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except FileNotFoundError:
+                pass
         os.umask(old)
-    print(f"auth_login: wrote {out_path} (secrets not logged)")
+    print("auth_login: refreshed auth state (secrets not logged)")
     return 0
 
 
