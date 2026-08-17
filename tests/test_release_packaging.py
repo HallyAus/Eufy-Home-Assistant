@@ -83,6 +83,33 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("sed 's/^[[:space:]]*//'", run_script)
         self.assertNotIn("tr -d '[:space:]'", run_script)
 
+    def test_token_refresh_does_not_depend_on_keep_warm(self):
+        run_script = (ROOT / "eufy_nvr/run.sh").read_text()
+        background_block = re.search(
+            r'if \[ "\$\{BACKGROUND_TASKS_STARTED\}" -eq 0 \]; then(?P<body>.*?)\n\s*fi',
+            run_script,
+            re.DOTALL,
+        ).group("body")
+
+        self.assertIn("start_relogin_timer", background_block)
+        self.assertLess(
+            background_block.index("start_relogin_timer"),
+            background_block.index('if [ "${KEEP_WARM}" = \'true\' ]; then'),
+        )
+
+    def test_signing_credentials_are_not_logged(self):
+        stream_script = (ROOT / "bridge/eufy_stream.py").read_text()
+        auth_script = (ROOT / "bridge/auth_login.py").read_text()
+
+        self.assertNotIn("txt[:120]", stream_script)
+        self.assertNotIn("sign_token[:20]", stream_script)
+        self.assertNotIn('log("sign token:"', stream_script)
+        self.assertIn('log("sign token acquired; channels", CHANNELS)', stream_script)
+        self.assertIn("ws/sign rejected the current auth session", stream_script)
+        self.assertIn("os.replace(temp_path, out_path)", auth_script)
+        self.assertNotIn("user_id {user_id[:6]}", auth_script)
+        self.assertNotIn("station_sn {station_sn}", auth_script)
+
     def test_known_hevc_input_skips_ffmpeg_probe_delay(self):
         stream_script = (ROOT / "bridge/eufy_stream.py").read_text()
 

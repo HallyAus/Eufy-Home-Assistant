@@ -78,6 +78,8 @@ HA), so these ports are opened directly on the host.
 - **Persistent recovery state** keeps the last successful auth session, discovery result, and generated
   go2rtc configuration in `/data`, so a transient cloud/login outage does not erase a working local setup.
 - **Automatic boot** brings the bridge back after a Home Assistant host restart.
+- **Periodic authentication refresh** runs for both on-demand and `keep_warm` streams, preventing an
+  expired cloud signaling session from leaving healthy local go2rtc ports with unusable producers.
 - **In-process supervise loop** in `run.sh` restarts go2rtc on a plain crash with exponential backoff
   (2s -> 60s cap), recovering faster than a full container bounce and without hammering the NVR.
 - A Docker `HEALTHCHECK` hits the same API endpoint.
