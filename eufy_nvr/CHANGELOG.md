@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.8
+
+- Update eufy's required SCTP framing runtime from the removed `0_0_2` CDN assets to the current
+  `0_0_4` files used by the web client. `security.eufy.com/plugin/libsctp_0_0_2.*` (and the two
+  worker shims) now return 404, so every image build failed at `fetch_deps.js`.
+
 ## 0.6.7
 
 - Refresh the eufy auth session periodically even when `keep_warm` is disabled, and replace the auth

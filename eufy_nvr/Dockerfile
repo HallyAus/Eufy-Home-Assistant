@@ -82,8 +82,8 @@ RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt paho
 #   - ffmpeg is already installed above; fetch_deps will detect it on PATH and skip it
 # We fetch go2rtc EXPLICITLY (pinned) below rather than via fetch_deps' "latest".
 RUN node fetch_deps.js \
-    && test -s worker/libsctp_0_0_2.js \
-    && test -s worker/libsctp_0_0_2.wasm \
+    && test -s worker/libsctp_0_0_4.js \
+    && test -s worker/libsctp_0_0_4.wasm \
     && node sctp_oracle.js selftest
 
 # go2rtc: pinned download straight from the release tag, into bridge/bin/go2rtc.
