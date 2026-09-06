@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'astra/**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install test dependencies
+        run: python -m pip install pytest aiohttp websockets cryptography pycryptodome PyYAML
+      - name: Compile Python
+        run: python -m compileall -q bridge custom_components tests
+      - name: Check shell and JavaScript syntax
+        run: |
+          bash -n eufy_nvr/run.sh bridge/start_bridge.sh
+          for file in bridge/*.js; do node --check "$file"; done
+      - name: Run regression tests
+        run: python -m pytest -q
+      - name: Prepare tracked-source audit snapshot
+        if: always()
+        run: git archive --format=tar.gz HEAD > source-snapshot.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-snapshot
+          path: source-snapshot.tar.gz
+          retention-days: 3
