@@ -12,7 +12,7 @@ class ReleasePackagingTest(unittest.TestCase):
     EUFY_RTSP_PORT = 8556
     EUFY_WEBRTC_PORT = 8557
 
-    def test_integration_addon_and_image_ref_share_one_version(self):
+    def test_integration_addon_versions_match_and_build_source_exists(self):
         manifest_version = json.loads(
             (ROOT / "custom_components/eufy_nvr/manifest.json").read_text()
         )["version"]
@@ -23,8 +23,10 @@ class ReleasePackagingTest(unittest.TestCase):
         dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
 
         self.assertEqual(addon_version, manifest_version)
-        self.assertIn(f'ARG REPO_REF="v{addon_version}"', dockerfile)
-        self.assertNotIn('ARG REPO_REF="main"', dockerfile)
+        # The release commit must remain buildable before its matching GitHub tag
+        # exists. Published release builds can override REPO_REF with the immutable tag.
+        self.assertIn('ARG REPO_REF="main"', dockerfile)
+        self.assertIn('git clone --depth 1 --branch "${REPO_REF}"', dockerfile)
 
     def test_addon_recovers_after_a_host_restart(self):
         config = (ROOT / "eufy_nvr/config.yaml").read_text()
