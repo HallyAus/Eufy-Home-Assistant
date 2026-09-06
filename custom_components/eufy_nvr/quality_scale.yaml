@@ -1,0 +1,25 @@
+rules:
+  config_flow: done
+  diagnostics: done
+  entity-unique-id: done
+  integration-owner: done
+  runtime-data: done
+  appropriate-polling: done
+  test-before-configure: done
+  reconfiguration-flow: done
+  entity-unavailable: done
+  common-modules: done
+  docs-installation-instructions: done
+  docs-installation-parameters: done
+  config-flow-test-coverage:
+    status: todo
+    comment: Full Home Assistant config-flow coverage is not yet present.
+  test-coverage:
+    status: todo
+    comment: Bridge/WebRTC state-machine coverage needs expansion before claiming Bronze quality.
+  exception-translations:
+    status: todo
+    comment: Runtime bridge failures still need structured user-facing translation keys.
+  strict-typing:
+    status: todo
+    comment: The integration is partially typed; the bridge is not yet strict-typed.
