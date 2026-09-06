@@ -64,26 +64,27 @@ fi
 DISCOVERY_FATAL=0
 discover_and_generate() {
     local attempt rc log_file
-    for attempt in 1 2 3; do
+    # eufy_run.py already opens up to three fresh signaling sessions per call.
+    # Two outer attempts allow one complete retry after a transient cloud/NVR busy period.
+    for attempt in 1 2; do
         log_file="${STATE_DIR}/discovery-attempt-${attempt}.log"
         : > "${log_file}"
-        bashio::log.info "Auto-discovering NVR + cameras (cmd 9100), attempt ${attempt}/3..."
+        bashio::log.info "Auto-discovering NVR + cameras (supervised attempt ${attempt}/2)..."
 
         set +o errexit
-        python3 eufy_stream.py --discover 2> >(tee "${log_file}" >&2)
+        python3 eufy_run.py --discover 2> >(tee "${log_file}" >&2)
         rc=$?
         set -o errexit
 
         if grep -q 'EUFY_AUTHORIZATION_ERROR_-104' "${log_file}"; then
             DISCOVERY_FATAL=1
-            bashio::log.fatal "Eufy NVR rejected application commands with status -104."
+            bashio::log.fatal "Eufy NVR rejected application commands with the shared/member authorization pattern."
             bashio::log.fatal "Use the eufy account that OWNS/administers this NVR. Shared/member accounts can authenticate but cannot open the NVR command session."
             return 2
         fi
 
-        if grep -q 'scall/turn status 100' "${log_file}" && ! grep -q 'NVR SDP offer received' "${log_file}"; then
-            bashio::log.warning "Eufy signaling stalled after scall/TURN status 100 without an SDP offer."
-            bashio::log.warning "This is a signaling/session establishment failure, not a camera-list or go2rtc failure; retrying with backoff."
+        if grep -q 'signaling timed out' "${log_file}"; then
+            bashio::log.warning "Eufy signaling did not progress from scall/TURN to an SDP offer; fresh signaling sessions were attempted automatically."
         fi
 
         if [ "${rc}" -eq 0 ] && [ -s "${EUFY_CAMERAS}" ]; then
@@ -96,7 +97,7 @@ discover_and_generate() {
             fi
             bashio::log.warning "gen_go2rtc.py failed; will retry."
         else
-            bashio::log.warning "Discovery failed (rc=${rc})."
+            bashio::log.warning "Discovery failed after supervised signaling retries (rc=${rc})."
         fi
 
         sleep "$((attempt * 5))"
