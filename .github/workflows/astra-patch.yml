@@ -1,0 +1,106 @@
+name: Apply bridge reliability hardening
+
+on:
+  push:
+    branches: [astra/reliability-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: astra/reliability-hardening
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch protocol error handling
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('bridge/eufy_stream.py')
+          text = path.read_text(encoding='utf-8')
+
+          old_state = '''    state = {"connected": False, "started": False, "vbytes": 0, "vframes": 0, "ptcs_in": 0,
+             "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False}'''
+          new_state = '''    state = {"connected": False, "started": False, "vbytes": 0, "vframes": 0, "ptcs_in": 0,
+             "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False,
+             "control_error_statuses": [], "fatal_error": None}'''
+          if old_state not in text:
+              raise SystemExit('state block not found; refusing unsafe patch')
+          text = text.replace(old_state, new_state, 1)
+
+          old_control = '''        else:                                                # control responses (1351 params, 1003/1004 acks, 9100)
+            try: txt = payload.split(b"\\x00")[0].decode("utf-8", "replace")
+            except Exception: txt = ""
+            if DISCOVER and '\"dev_list\"' in txt and not state["discovered"]:
+                handle_devlist(txt)
+            else:
+                log(f"CTRL cmd={cmdid} link={link} len={len(buf)} {txt[:170]}")
+            framelog.write(json.dumps({"ctrl": True, "cmd": cmdid, "link": link, "len": len(buf), "txt": txt[:600]}) + "\\n"); framelog.flush()'''
+          new_control = '''        else:                                                # control responses (1351 params, 1003/1004 acks, 9100)
+            # Some NVR command failures are not JSON. They are a fixed-size buffer
+            # containing a signed little-endian status followed entirely by zeroes.
+            # Treat those as protocol status frames rather than decoding them as text.
+            fixed_status = None
+            if len(payload) >= 4 and not any(payload[4:]):
+                head = payload[:4]
+                if any(byte < 0x20 or byte > 0x7E for byte in head):
+                    fixed_status = int.from_bytes(head, "little", signed=True)
+
+            if fixed_status is not None:
+                state["control_error_statuses"].append(fixed_status)
+                log(f"CTRL cmd={cmdid} link={link} len={len(buf)} ERROR STATUS={fixed_status} "
+                    f"(fixed {len(payload)}B status reply, no JSON payload)")
+                framelog.write(json.dumps({"ctrl": True, "cmd": cmdid, "link": link,
+                                           "len": len(buf), "status": fixed_status}) + "\\n"); framelog.flush()
+                if fixed_status == -104:
+                    state["fatal_error"] = "owner_account_required"
+                    log("AUTHORIZATION FAILED (-104): this eufy account is most likely a shared/member "
+                        "user. Configure the account that OWNS/administers the NVR, then retry discovery.")
+                return
+
+            try: txt = payload.split(b"\\x00")[0].decode("utf-8", "replace")
+            except Exception: txt = ""
+            if DISCOVER and '\"dev_list\"' in txt and not state["discovered"]:
+                handle_devlist(txt)
+            else:
+                log(f"CTRL cmd={cmdid} link={link} len={len(buf)} {txt[:170]}")
+            framelog.write(json.dumps({"ctrl": True, "cmd": cmdid, "link": link, "len": len(buf), "txt": txt[:600]}) + "\\n"); framelog.flush()'''
+          if old_control not in text:
+              raise SystemExit('control block not found; refusing unsafe patch')
+          text = text.replace(old_control, new_control, 1)
+
+          old_watchdog = '''            for _ in range(80):                      # ~40s ceiling
+                if state["discovered"]:
+                    break
+                await asyncio.sleep(0.5)'''
+          new_watchdog = '''            for _ in range(80):                      # ~40s ceiling
+                if state["discovered"] or state["fatal_error"]:
+                    break
+                await asyncio.sleep(0.5)
+            if state["fatal_error"] == "owner_account_required":
+                log("discovery aborted early: NVR rejected commands with -104 (owner account required)")
+            elif not state["discovered"] and not answered[0]:
+                log("discovery timed out before an SDP offer arrived; signaling/TURN negotiation stalled")'''
+          if old_watchdog not in text:
+              raise SystemExit('watchdog block not found; refusing unsafe patch')
+          text = text.replace(old_watchdog, new_watchdog, 1)
+
+          path.write_text(text, encoding='utf-8')
+      - name: Verify syntax and focused tests
+        run: |
+          python -m py_compile bridge/eufy_stream.py
+          python -m unittest discover -s tests -v
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bridge/eufy_stream.py
+          git commit -m 'Decode NVR command status and surface owner-account failures'
+          git push origin HEAD:astra/reliability-hardening
