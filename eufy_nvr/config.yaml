@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.6.9"
+version: "0.7.0"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
@@ -7,22 +7,10 @@ arch:
   - aarch64
   - amd64
 init: false
-# "application" = long-running service that HA keeps up; pairs with the watchdog below.
 startup: application
 boot: auto
-
-# host_network is REQUIRED: the engine talks LAN-direct to the NVR (WebRTC media + UDP), and
-# go2rtc must be reachable on the HA host's LAN address by HA Core / Generic Camera.
-# With host_network the ports below are informational (no NAT is applied), but we
-# keep them so the Supervisor UI documents what the add-on opens.
 host_network: true
-
-# Watchdog: Supervisor pings this TCP endpoint; if go2rtc's API stops answering, the add-on is
-# restarted. run.sh ALSO has its own supervise loop (restart-on-crash) so transient engine
-# failures recover in-process without a full container bounce.
 watchdog: "tcp://[HOST]:[PORT:1985]"
-
-# Ingress points the "Open Web UI" button at go2rtc's built-in UI (stream list + WebRTC test player).
 ingress: false
 panel_icon: mdi:cctv
 webui: "http://[HOST]:[PORT:1985]/"
@@ -38,20 +26,6 @@ ports_description:
   8557/tcp: WebRTC (TCP candidate)
   8557/udp: WebRTC (UDP candidate)
 
-# --- Auth (v0.4): headless email/password login (no token paste) ---------------
-# run.sh runs auth_login.py, which logs into the eufy passport (reversed ECDH+AES login --
-# the body's password is ECDH/AES-256-CBC encrypted and the whole request rides the openapi
-# ECDH share-key wrapper; see bridge/eufy_cloud.py), derives the NVR station_sn from the
-# station list, and writes auth.json. Credentials live only in the add-on options + an
-# in-container auth.json (chmod 600) and are never logged.
-#   region         -- eufy SERVER region your account lives on: US | EU | IE (default US).
-#   country        -- OPTIONAL account country code (e.g. AU, NZ, CA). Leave blank to use the
-#                     region as the country. Set this if your account is registered outside
-#                     US/EU/IE (e.g. AU) — it authenticates against the chosen region server
-#                     while identifying your real country. Try region US first if unsure.
-#   station_sn     -- optional: set if auto-discovery can't find the NVR serial.
-#   captcha_id / captcha_answer -- optional: only if a login is challenged with a graphic
-#                     captcha (the log prints the captcha_id; solve it and set both, restart).
 options:
   email: ""
   password: ""
@@ -67,14 +41,8 @@ schema:
   region: list(US|EU|IE)?
   country: str?
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
-  # keep_warm: hold each online camera warm so HA live-view opens instantly (no 5-13s cold start).
-  #   DEFAULT OFF: it costs one continuous H.264 transcode per online camera -> only enable on a
-  #   host with CPU headroom (a low-power aarch64/RPi can be saturated by 3-4 always-on encodes).
   keep_warm: bool?
-  # token_refresh_hours: how often to re-login and refresh auth.json (the eufy token is ~1-day).
   token_refresh_hours: int(0,)?
-  # video_copy: publish raw H.265 instead of transcoding to H.264 (lower CPU, but the browser live
-  #   view shows the still thumbnail only). Pair with keep_warm for a low-CPU always-on warm.
   video_copy: bool?
   station_sn: str?
   captcha_id: str?
