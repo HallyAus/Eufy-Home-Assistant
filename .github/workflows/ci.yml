@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pyyaml
+      - name: Compile Python sources
+        run: python -m compileall -q bridge custom_components tests
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
+
+  repository-validation:
+    name: Repository validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate JSON and YAML
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          import yaml
+
+          for path in Path('.').rglob('*.json'):
+              if any(part in {'.git', 'node_modules'} for part in path.parts):
+                  continue
+              json.loads(path.read_text(encoding='utf-8'))
+              print(f'OK JSON {path}')
+
+          for pattern in ('*.yaml', '*.yml'):
+              for path in Path('.').rglob(pattern):
+                  if any(part in {'.git', 'node_modules'} for part in path.parts):
+                      continue
+                  yaml.safe_load(path.read_text(encoding='utf-8'))
+                  print(f'OK YAML {path}')
+      - name: Validate Home Assistant metadata
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path('custom_components/eufy_nvr/manifest.json').read_text())
+          addon = __import__('yaml').safe_load(Path('eufy_nvr/config.yaml').read_text())
+
+          assert manifest['domain'] == 'eufy_nvr'
+          assert manifest['config_flow'] is True
+          assert manifest['integration_type'] == 'hub'
+          assert manifest['version'] == addon['version'], (
+              f"integration {manifest['version']} != add-on {addon['version']}"
+          )
+
+          required = {'bridge/eufy_stream.py', 'bridge/sctp_oracle.js', 'bridge/fetch_deps.js'}
+          missing = [p for p in required if not Path(p).is_file()]
+          assert not missing, f'missing runtime files: {missing}'
+          print(f"Release metadata aligned at {manifest['version']}")
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: shellcheck eufy_nvr/run.sh bridge/start_bridge.sh
