@@ -70,7 +70,8 @@ class ReleasePackagingTest(unittest.TestCase):
         run_script = (ROOT / "eufy_nvr/run.sh").read_text()
 
         for content in (fetch_script, oracle, dockerfile, run_script):
-            self.assertIn("0_0_2", content)
+            self.assertIn("0_0_4", content)
+            self.assertNotIn("0_0_2", content)
             self.assertNotIn("0_0_1", content)
 
         self.assertIn("workerFailures", fetch_script)
