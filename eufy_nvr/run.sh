@@ -1,16 +1,4 @@
 #!/usr/bin/with-contenv bashio
-# =============================================================================
-# Eufy NVR Local — add-on entrypoint
-#
-#   1. Refresh auth.json from the add-on options, with persistent-cache fallback.
-#   2. Auto-discover the NVR + cameras (cmd 9100) -> cameras.json.
-#   3. Generate go2rtc.yaml from the discovered cameras.
-#   4. Run go2rtc under a supervise loop (restart-on-crash with backoff).
-#
-# go2rtc binds dedicated RTSP :8556 / API :1985 / WebRTC :8557 ports on the HOST network, so HA
-# reaches the cameras through the HA host's LAN address, while internal warmers use loopback. The
-# Supervisor watchdog can poll tcp://[HOST]:1985.
-# =============================================================================
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -24,19 +12,11 @@ export GO2RTC_WEBRTC_PORT="8557"
 mkdir -p "${STATE_DIR}"
 cd "${BRIDGE_DIR}"
 
-# --- map the add-on log_level option onto go2rtc's log level -----------------
 LOG_LEVEL="$(bashio::config 'log_level' 'info')"
 export EUFY_LOG_LEVEL="${LOG_LEVEL}"
 
-# -----------------------------------------------------------------------------
-# 1) Auth: headless email/password login -> auth.json (the engine reads it).
-#    auth_login.py logs into the eufy passport, derives the NVR station_sn from the
-#    station list, and writes auth.json. Credentials are passed via env (never argv),
-#    scrubbed afterwards, and never logged. The file is chmod 600.
-# -----------------------------------------------------------------------------
 if ! bashio::config.has_value 'email' || ! bashio::config.has_value 'password'; then
     bashio::log.fatal "Set 'email' and 'password' (your eufy account) in the add-on configuration."
-    # Exit non-zero but slowly, so the Supervisor doesn't crash-loop the UI.
     sleep 15
     exit 1
 fi
@@ -45,10 +25,8 @@ export EUFY_EMAIL="$(bashio::config 'email')"
 export EUFY_PASSWORD="$(bashio::config 'password')"
 export EUFY_REGION="$(bashio::config 'region' 'US')"
 export EUFY_AUTH="${STATE_DIR}/auth.json"
-# Persist the discovered camera manifest alongside auth.json. eufy_stream.py writes it
-# here and gen_go2rtc.py reads it from here, so a container rebuild/restart keeps the
-# last known camera list for the discovery-failure fallback below.
 export EUFY_CAMERAS="${STATE_DIR}/cameras.json"
+export EUFY_STREAM_NAMES="${STATE_DIR}/stream_names.json"
 if bashio::config.has_value 'country'; then export EUFY_COUNTRY="$(bashio::config 'country')"; fi
 if bashio::config.has_value 'station_sn'; then export EUFY_STATION_SN="$(bashio::config 'station_sn')"; fi
 if bashio::config.has_value 'captcha_id'; then export EUFY_CAPTCHA_ID="$(bashio::config 'captcha_id')"; fi
@@ -73,7 +51,6 @@ unset EUFY_PASSWORD
 chmod 600 "${EUFY_AUTH}" 2>/dev/null || true
 bashio::log.info "Credentials kept out of logs; runtime state is persisted under /data."
 
-# Sanity-check the worker WASM the SCTP oracle needs (fetched at build time).
 if [ ! -s "${BRIDGE_DIR}/worker/libsctp_0_0_4.js" ] || [ ! -s "${BRIDGE_DIR}/worker/libsctp_0_0_4.wasm" ]; then
     bashio::log.fatal "Required eufy libsctp 0_0_4 runtime assets are missing; the image is invalid."
     exit 1
@@ -84,34 +61,55 @@ if [ ! -x "${BRIDGE_DIR}/bin/go2rtc" ]; then
     exit 1
 fi
 
-# -----------------------------------------------------------------------------
-# 2) Discovery + 3) go2rtc.yaml generation.
-#    Discovery briefly opens the single NVR live session, so we retry a few times
-#    rather than giving up on the first transient failure.
-# -----------------------------------------------------------------------------
+DISCOVERY_FATAL=0
 discover_and_generate() {
-    local attempt
+    local attempt rc log_file
     for attempt in 1 2 3; do
+        log_file="${STATE_DIR}/discovery-attempt-${attempt}.log"
+        : > "${log_file}"
         bashio::log.info "Auto-discovering NVR + cameras (cmd 9100), attempt ${attempt}/3..."
-        # eufy_stream.py --discover now writes straight to ${EUFY_CAMERAS} and exits
-        # non-zero if it never got a camera list; the -s check is a belt-and-braces guard.
-        if python3 eufy_stream.py --discover && [ -s "${EUFY_CAMERAS}" ]; then
+
+        set +o errexit
+        python3 eufy_stream.py --discover 2> >(tee "${log_file}" >&2)
+        rc=$?
+        set -o errexit
+
+        if grep -q 'EUFY_AUTHORIZATION_ERROR_-104' "${log_file}"; then
+            DISCOVERY_FATAL=1
+            bashio::log.fatal "Eufy NVR rejected application commands with status -104."
+            bashio::log.fatal "Use the eufy account that OWNS/administers this NVR. Shared/member accounts can authenticate but cannot open the NVR command session."
+            return 2
+        fi
+
+        if grep -q 'scall/turn status 100' "${log_file}" && ! grep -q 'NVR SDP offer received' "${log_file}"; then
+            bashio::log.warning "Eufy signaling stalled after scall/TURN status 100 without an SDP offer."
+            bashio::log.warning "This is a signaling/session establishment failure, not a camera-list or go2rtc failure; retrying with backoff."
+        fi
+
+        if [ "${rc}" -eq 0 ] && [ -s "${EUFY_CAMERAS}" ]; then
             bashio::log.info "Discovery OK -> ${EUFY_CAMERAS}"
             if python3 gen_go2rtc.py "127.0.0.1"; then
                 install -m 600 "${BRIDGE_DIR}/go2rtc.yaml" "${CONFIG_PATH}"
                 bashio::log.info "Generated go2rtc.yaml from discovered cameras."
+                rm -f "${log_file}" 2>/dev/null || true
                 return 0
             fi
             bashio::log.warning "gen_go2rtc.py failed; will retry."
         else
-            bashio::log.warning "Discovery failed (check auth_token / station_sn / region)."
+            bashio::log.warning "Discovery failed (rc=${rc})."
         fi
-        sleep 5
+
+        sleep "$((attempt * 5))"
     done
     return 1
 }
 
 if ! discover_and_generate; then
+    if [ "${DISCOVERY_FATAL}" -eq 1 ]; then
+        bashio::log.fatal "Discovery stopped because the configured account is not authorized by the NVR."
+        sleep 15
+        exit 1
+    fi
     if [ -s "${EUFY_CAMERAS}" ] && python3 gen_go2rtc.py "127.0.0.1"; then
         install -m 600 "${BRIDGE_DIR}/go2rtc.yaml" "${CONFIG_PATH}"
         bashio::log.warning "Discovery failed; regenerated go2rtc.yaml from the last discovered camera list (${EUFY_CAMERAS})."
@@ -119,41 +117,24 @@ if ! discover_and_generate; then
         bashio::log.warning "Discovery failed but a previous go2rtc.yaml exists — starting with it."
     else
         bashio::log.fatal "Could not discover cameras and no cached go2rtc.yaml is present. Aborting."
-        bashio::log.fatal "Check the ws/sign status above. Common causes are a mismatched region or rejected session token."
+        bashio::log.fatal "Check the signaling messages above. Common causes are region mismatch, expired auth, a busy NVR session, or a stalled scall/TURN negotiation."
         sleep 15
         exit 1
     fi
 fi
 
-# Inject the operator's chosen log level into the generated config (gen_go2rtc hardcodes 'info').
 if command -v sed >/dev/null 2>&1; then
     sed -i "s/^  level: .*/  level: ${LOG_LEVEL}/" "${CONFIG_PATH}" || true
 fi
 
 bashio::log.info "Discovered streams:"
-# List only the stream slugs (the lines under 'streams:'), never the exec command/secrets.
 grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${CONFIG_PATH}" | sed 's/:.*$//' | sed 's/^/    /' || true
 
-# -----------------------------------------------------------------------------
-# Optional raw H.265 passthrough (video_copy=true): lower CPU, but the browser
-# live view shows only the still thumbnail. Exported here so the go2rtc-exec'd
-# eufy_stream.py inherits it. Default is the H.264 transcode (browser-playable).
-# -----------------------------------------------------------------------------
 if bashio::config.true 'video_copy'; then
     export EUFY_VIDEO_COPY=1
     bashio::log.warning "video_copy=true -> publishing raw H.265 (live view will be thumbnail-only)."
 fi
 
-# -----------------------------------------------------------------------------
-# keep-warm (opt-in, DEFAULT OFF): hold each ONLINE camera's producer warm so HA
-# live-view opens instantly (no 5-13s WebRTC cold start). Each warmer is a
-# consumer that pulls the stream to /dev/null, keeping go2rtc's eufy_stream.py
-# producer (and its NVR WebRTC session) alive. With the H.264 transcode this is
-# one continuous software encode PER online camera, so it is off by default —
-# enable only on a host with CPU headroom (pair with video_copy for a cheap
-# warm). Periodic re-login is independent of keep-warm so on-demand streams can
-# reconnect past the ~1-day eufy token; cadence via 'token_refresh_hours'.
-# -----------------------------------------------------------------------------
 KEEP_WARM="$(bashio::config 'keep_warm' 'false')"
 WARM_PIDS=()
 RELOGIN_PID=""
@@ -161,7 +142,7 @@ RELOGIN_PID=""
 start_warmers() {
     local s streams i=0
     mapfile -t streams < <(grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${CONFIG_PATH}" \
-        | grep -v 'offline at discovery' | sed 's/:.*$//' | sed 's/^[[:space:]]*//')
+        | sed 's/:.*$//' | sed 's/^[[:space:]]*//')
     if [ "${#streams[@]}" -eq 0 ]; then
         bashio::log.warning "keep-warm: no online streams in go2rtc.yaml; nothing to warm."
         return 0
@@ -169,8 +150,6 @@ start_warmers() {
     bashio::log.info "keep-warm: warming ${#streams[@]} camera(s) (staggered)."
     for s in "${streams[@]}"; do
         [ -n "${s}" ] || continue
-        # Stagger each warmer's FIRST cold-start (i*6s + 3s for go2rtc to bind) INSIDE the
-        # subshell, so the main shell reaches `wait` immediately and we don't hit the NVR at once.
         ( sleep "$(( i * 6 + 3 ))"
           while true; do
             ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
@@ -206,30 +185,20 @@ term() {
     bashio::log.info "Received stop signal; shutting down go2rtc (pid ${GO2RTC_PID:-?}) + warmers."
     [ -n "${RELOGIN_PID:-}" ] && kill "${RELOGIN_PID}" 2>/dev/null || true
     for p in "${WARM_PIDS[@]:-}"; do [ -n "${p}" ] && kill "${p}" 2>/dev/null || true; done
-    # best-effort: reap any warmer ffmpeg children still pulling the warm streams
     if command -v pkill >/dev/null 2>&1; then pkill -f "rtsp://127.0.0.1:${GO2RTC_RTSP_PORT}/eufy_" 2>/dev/null || true; fi
     [ -n "${GO2RTC_PID:-}" ] && kill -TERM "${GO2RTC_PID}" 2>/dev/null || true
     exit 0
 }
 trap term SIGTERM SIGINT
 
-# -----------------------------------------------------------------------------
-# 4) Supervise loop: keep go2rtc up. The Supervisor watchdog (tcp://[HOST]:1985)
-#    bounces the whole container if the API dies; this inner loop recovers faster
-#    from a plain crash and applies a capped backoff to avoid hammering the NVR.
-# -----------------------------------------------------------------------------
 BACKGROUND_TASKS_STARTED=0
 backoff=2
 while true; do
     bashio::log.info "Starting go2rtc (RTSP :${GO2RTC_RTSP_PORT}, WebRTC :${GO2RTC_WEBRTC_PORT}, API/UI :${GO2RTC_API_PORT}, log=${LOG_LEVEL})..."
     started=$(date +%s)
-
-    # Run in the background so the trap can forward SIGTERM promptly during HA shutdown.
     ./bin/go2rtc -config "${CONFIG_PATH}" &
     GO2RTC_PID=$!
 
-    # Start the token refresher once for both on-demand and keep-warm operation. Warmers self-heal
-    # across go2rtc restarts; start_warmers returns immediately (stagger is inside each warmer).
     if [ "${BACKGROUND_TASKS_STARTED}" -eq 0 ]; then
         start_relogin_timer
         if [ "${KEEP_WARM}" = 'true' ]; then
@@ -243,13 +212,11 @@ while true; do
     rc=$?
     set -o errexit
 
-    # Clean exit (stopped by HA) -> leave the loop.
     if [ "${rc}" -eq 0 ] || [ "${rc}" -eq 143 ]; then
         bashio::log.info "go2rtc exited cleanly (rc=${rc}). Done."
         break
     fi
 
-    # Reset backoff if it ran for a healthy while (a real crash, not a config error).
     now=$(date +%s)
     if [ "$((now - started))" -ge 60 ]; then
         backoff=2
@@ -257,7 +224,6 @@ while true; do
 
     bashio::log.warning "go2rtc exited unexpectedly (rc=${rc}); restarting in ${backoff}s."
     sleep "${backoff}"
-    # Exponential backoff capped at 60s.
     backoff=$(( backoff * 2 ))
     [ "${backoff}" -gt 60 ] && backoff=60
 done
