@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Validate discovery state and generate stable, on-demand go2rtc streams.
 
-The existing CLI and EUFY_CAMERAS override are preserved. Stream identities are
-stored alongside the discovery manifest, so a camera rename does not rename its
-Home Assistant entity after the first successful run of this version.
+Stream identities are persisted so camera renames do not rename Home Assistant
+entities. The generated go2rtc surface is intentionally restricted and Eufy's
+slow cold-start path gets an explicit exec startup timeout.
 """
 
 from __future__ import annotations
@@ -18,16 +18,15 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 STREAM_NAME = re.compile(r"eufy_[a-z0-9_]+\Z")
+STREAM_START_TIMEOUT = int(os.environ.get("EUFY_STREAM_START_TIMEOUT", "60"))
 
 
 def slug(name: str | None, channel: int) -> str:
-    """Keep legacy stream names when no collision exists."""
     value = re.sub(r"[^a-z0-9]+", "_", (name or f"ch{channel}").lower()).strip("_")
     return "eufy_" + (value or f"ch{channel}")
 
 
 def validate_manifest(value: Any) -> dict[str, Any]:
-    """Reject malformed discovery state before touching any generated files."""
     if not isinstance(value, dict) or not isinstance(value.get("cameras"), list):
         raise ValueError("camera manifest must contain a cameras list")
     station = value.get("nvr_sn", "")
@@ -64,7 +63,6 @@ def validate_manifest(value: Any) -> dict[str, Any]:
 
 
 def validate_registry(value: Any) -> dict[str, str]:
-    """Never silently replace an invalid registry and change entity identities."""
     if not isinstance(value, dict) or value.get("version") != 1:
         raise ValueError("unsupported stream-name registry; restore a valid backup")
     names = value.get("names")
@@ -83,7 +81,6 @@ def validate_registry(value: Any) -> dict[str, str]:
 
 
 def camera_key(station: str, camera: dict[str, Any]) -> str:
-    """Prefer device serial; channels are the fallback when serials are absent."""
     identity = [station, "serial", camera["sn"]] if camera.get("sn") else [
         station, "channel", camera["channel"]
     ]
@@ -93,11 +90,6 @@ def camera_key(station: str, camera: dict[str, Any]) -> str:
 def assign_names(
     manifest: dict[str, Any], previous: dict[str, str]
 ) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, str]]:
-    """Allocate collision-free names, preserving offline/removed reservations.
-
-    New colliding names are resolved in channel order, independent of discovery
-    order. Existing reservations always win. No serial is exposed in a stream URL.
-    """
     names = dict(previous)
     used = set(names.values())
     result = []
@@ -130,25 +122,49 @@ def render_config(
     rtsp_port: int = 8554,
     webrtc_port: int = 8555,
 ) -> str:
-    """Render conservative YAML without a third-party runtime dependency."""
     ports = [validate_port(port) for port in (api_port, rtsp_port, webrtc_port)]
     if len(set(ports)) != 3:
         raise ValueError("API, RTSP and WebRTC ports must be different")
+    if STREAM_START_TIMEOUT < 1 or STREAM_START_TIMEOUT > 300:
+        raise ValueError("EUFY_STREAM_START_TIMEOUT must be between 1 and 300 seconds")
+
     online = [(name, camera) for name, camera in named if camera.get("status") != 0]
-    lines = ["# Generated from validated discovery state. Online, on-demand streams.",
-             "streams:" if online else "streams: {}"]
+    lines = [
+        "# Generated from validated discovery state. Online, on-demand streams.",
+        "app:",
+        "  modules: [api, rtsp, webrtc, exec]",
+        "",
+        "streams:" if online else "streams: {}",
+    ]
     for name, camera in online:
-        command = f"exec:python eufy_stream.py {camera['channel']} --rtsp {{output}}"
-        # Keep one stream per line for the add-on's existing warmer/listing code.
+        command = (
+            f"exec:python eufy_stream.py {camera['channel']} --rtsp {{output}}"
+            f"#starttimeout={STREAM_START_TIMEOUT}#killtimeout=5"
+        )
         lines.append(f"  {name}: {json.dumps(command)}")
-    for section, port in (("rtsp", rtsp_port), ("api", api_port), ("webrtc", webrtc_port)):
-        lines.extend(["", f"{section}:", f'  listen: ":{port}"'])
-    lines.extend(["", "log:", "  level: info", ""])
+    lines.extend([
+        "",
+        "exec:",
+        "  allow_paths: [python]",
+        "",
+        "rtsp:",
+        f'  listen: ":{rtsp_port}"',
+        "",
+        "api:",
+        f'  listen: ":{api_port}"',
+        "  allow_paths: [/api, /api/streams, /api/webrtc, /api/frame.jpeg]",
+        "",
+        "webrtc:",
+        f'  listen: ":{webrtc_port}"',
+        "",
+        "log:",
+        "  level: info",
+        "",
+    ])
     return "\n".join(lines)
 
 
 def atomic_write(path: Path, text: str) -> None:
-    """Replace one complete file, using a private temporary on the same volume."""
     temporary: str | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -156,9 +172,8 @@ def atomic_write(path: Path, text: str) -> None:
             prefix=f".{path.name}-", suffix=".tmp", delete=False,
         ) as handle:
             temporary = handle.name
-            json_mode = 0o600
             if os.name != "nt":
-                os.fchmod(handle.fileno(), json_mode)
+                os.fchmod(handle.fileno(), 0o600)
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
@@ -173,12 +188,6 @@ def generate(
     manifest_path: Path, output_path: Path, registry_path: Path,
     *, api_port: int = 1984, rtsp_port: int = 8554, webrtc_port: int = 8555,
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Validate first, persist identities, then atomically replace go2rtc.yaml.
-
-    Run one generator at a time (as the add-on already does). These two file
-    replacements are not a cross-file transaction: saving the registry first
-    ensures an interrupted config write still reserves the same names on retry.
-    """
     paths = [path.resolve() for path in (manifest_path, output_path, registry_path)]
     if len(set(paths)) != 3:
         raise ValueError("manifest, config and stream registry must be different files")
@@ -208,8 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         named = generate(manifest_path, output_path, registry_path,
                          api_port=api_port, rtsp_port=rtsp_port, webrtc_port=webrtc_port)
     except FileNotFoundError:
-        print("gen_go2rtc: discovery file or output directory not found; "
-              "run `python eufy_stream.py --discover` first", file=sys.stderr)
+        print("gen_go2rtc: discovery file or output directory not found; run `python eufy_stream.py --discover` first", file=sys.stderr)
         return 1
     except (OSError, ValueError) as error:
         print(f"gen_go2rtc: generation failed: {error}", file=sys.stderr)
