@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.0
+
+- Harden discovery/config generation with persistent collision-safe stream identities, strict manifest and
+  registry validation, atomic writes, and valid empty configuration when all cameras are offline.
+- Harden the Home Assistant integration with safer host/port validation, IPv6-safe URLs, duplicate endpoint
+  detection, corrected reconfiguration identity, removal of the redundant double-reload listener, and
+  coalesced/timeout-bounded snapshots.
+- Upgrade go2rtc from `v1.9.9` to `v1.9.14` and configure a 60-second exec `starttimeout` plus bounded process
+  termination for slow Eufy WebRTC cold starts. This directly addresses the premature `exec: timeout` path
+  reported in issue #5, while keeping the issue open until physical NVR validation confirms the full live path.
+- Document that the configured eufy account must own/administer the NVR; shared/member accounts can authenticate
+  but may receive fixed `-104` command rejections (issue #8).
+- Keep issue #6 open: `scall/turn status 100` without a later status 200 / SDP offer is a separate signalling
+  failure and is not safe to claim fixed without device-side validation.
+- Make development add-on builds use an existing source ref rather than depending on a release tag before it exists.
+
 ## 0.6.9
 
 - Update eufy's required SCTP framing runtime from the removed `0_0_2` CDN assets to the current
