@@ -27,3 +27,8 @@ node_modules/
 .DS_Store
 .idea/
 .vscode/
+
+# Persistent stream identities (may contain private NVR metadata)
+bridge/stream_names.json
+source-snapshot.tar.gz
+.pytest_cache/

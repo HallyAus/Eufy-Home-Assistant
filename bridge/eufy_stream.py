@@ -2,15 +2,18 @@
 """
 eufy_stream.py - full local live pipeline for the eufy S4 NVR (T8N00).
 
-Reuses the proven WebRTC transport (see eufy_webrtc.py / notes/04) and adds:
-  * a Node "libsctp oracle" subprocess (scripts/sctp_oracle.js) running eufy's exact framing WASM,
-  * sending the openLive XZYH command (notes/05, 06) so the NVR starts pushing video,
-  * reassembling the inbound PTCS frames back into XZYH app frames, and dumping the video.
+Runs the authenticated WebRTC transport and:
+  * a Node "libsctp oracle" subprocess (sctp_oracle.js) running eufy's exact framing WASM,
+  * sends openLive and startStream commands to request video,
+  * extracts video for ffmpeg/go2rtc; private captures are opt-in only.
 
-Auth: captures/eufy_auth.json (webcap/token.js). user_id: captures/user_id.txt (decrypted from auid).
-Run:  python scripts/eufy_stream.py [channel]      (channel 0..3, default 0)
+Auth: EUFY_AUTH or bridge/auth.json, created by auth_login.py or get_auth.js.
+Run: python eufy_stream.py [channel] --rtsp <local-publish-url>
 """
 import asyncio, json, time, uuid, os, sys, hashlib, random, re, base64, struct
+import ipaddress
+import signal
+from runtime import MAX_PIPE_BUFFER, MediaWatchdog, SessionResources, command_error_status
 
 import aiohttp
 import websockets
@@ -84,9 +87,11 @@ HEADERS = {
     "accept": "application/json, text/plain, */*", "user-agent": UA,
     "origin": "https://security.eufy.com", "referer": "https://security.eufy.com/",
 }
-os.makedirs(os.path.join(ROOT, "_debug"), exist_ok=True)
-VIDEO_DUMP = os.path.join(ROOT, "_debug", "video_dump.bin")
-FRAMES_LOG = os.path.join(ROOT, "_debug", "frames.jsonl")
+DEBUG_CAPTURE = os.environ.get("EUFY_DEBUG_CAPTURE") == "1"
+if DEBUG_CAPTURE:
+    os.makedirs(os.path.join(ROOT, "_debug"), mode=0o700, exist_ok=True)
+VIDEO_DUMP = os.path.join(ROOT, "_debug", f"video_dump_{os.getpid()}.bin")
+FRAMES_LOG = os.path.join(ROOT, "_debug", f"frames_{os.getpid()}.jsonl")
 # Discovery manifest. Like EUFY_AUTH, the add-on points this at /data so the
 # discovered camera list survives a container restart/rebuild and gen_go2rtc.py
 # reads it from the exact same place; default to the bridge dir for standalone runs.
@@ -153,7 +158,7 @@ def build_ping():
     return bytes(s) + bytes(hdr)
 
 async def get_sign_token():
-    async with aiohttp.ClientSession() as s:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as s:
         async with s.get(SIGN_URL, headers=HEADERS) as r:
             try:
                 body = await r.json(content_type=None)
@@ -221,7 +226,9 @@ def parse_msg(raw):
 
 class Oracle:
     """Bridge to the Node libsctp framing oracle."""
-    def __init__(self):
+    def __init__(self, resources):
+        self.resources = resources
+        self.failed = False
         self.proc = None; self.ready = asyncio.Event()
         self.on_tx = None      # callback(bytes) -> send PTCS packet on WebrtcDataChannel
         self.on_frame = None   # callback(link:int, bytes) -> reassembled frame
@@ -232,8 +239,9 @@ class Oracle:
             NODE, ORACLE, "serve",
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             limit=64 * 1024 * 1024)
-        asyncio.ensure_future(self._read_stdout())
-        asyncio.ensure_future(self._read_stderr())
+        self.resources.processes.append(self.proc)
+        self.resources.create_task(self._read_stdout())
+        self.resources.create_task(self._read_stderr())
         await asyncio.wait_for(self.ready.wait(), timeout=15)
         log("oracle ready")
 
@@ -242,9 +250,11 @@ class Oracle:
             try:
                 line = await self.proc.stdout.readline()
             except Exception as e:
-                log("oracle stdout read err:", repr(e));
-                await asyncio.sleep(0.01); continue
+                log("oracle stdout read failed:", type(e).__name__)
+                self.failed = True
+                break
             if not line:
+                self.failed = True
                 break
             try: msg = json.loads(line.decode("utf-8").strip())
             except Exception: continue
@@ -273,15 +283,31 @@ class Oracle:
         self._write({"op": "send", "link": link, "b64": base64.b64encode(frame_bytes).decode()})
 
     def _write(self, obj):
+        if self.failed:
+            return
         if self.proc and self.proc.stdin:
-            self.proc.stdin.write((json.dumps(obj) + "\n").encode())
+            if self.proc.stdin.transport.get_write_buffer_size() > MAX_PIPE_BUFFER:
+                self.failed = True
+                return
+            try:
+                self.proc.stdin.write((json.dumps(obj) + "\n").encode())
+            except (BrokenPipeError, ConnectionResetError):
+                self.failed = True
 
 
 async def main():
+    task = asyncio.current_task()
+    if os.name != "nt":
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+    async with SessionResources() as resources:
+        return await run_session(resources)
+
+
+async def run_session(resources):
     sign_token = await get_sign_token()
     log("sign token acquired; channels", CHANNELS)
 
-    oracle = Oracle(); await oracle.start()
+    oracle = Oracle(resources); await oracle.start()
 
     sub = {"region": AUTH.get("webCountry", "US"), "type": "NVR", "sn": STATION_SN,
            "token": AUTH["authToken"], "gtoken": AUTH["gtoken"], "sign": sign_token,
@@ -289,10 +315,19 @@ async def main():
     subproto = base64.urlsafe_b64encode(json.dumps(sub, separators=(",", ":")).encode()).decode().rstrip("=")
 
     pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
+    resources.peer = pc
+    watchdog = MediaWatchdog()
     chans = {}
     state = {"connected": False, "started": False, "vbytes": 0, "vframes": 0, "ptcs_in": 0,
-             "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False}
-    dumpf = open(VIDEO_DUMP, "wb"); framelog = open(FRAMES_LOG, "w")
+             "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False, "failure": None}
+    old_umask = os.umask(0o077)
+    try:
+        dumpf = open(VIDEO_DUMP if DEBUG_CAPTURE else os.devnull, "wb")
+        resources.files.append(dumpf)
+        framelog = open(FRAMES_LOG if DEBUG_CAPTURE else os.devnull, "w")
+        resources.files.append(framelog)
+    finally:
+        os.umask(old_umask)
 
     # Pick the Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file.
     ffmpeg_proc = None
@@ -320,8 +355,9 @@ async def main():
             *vcodec, "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL)
+        resources.processes.append(ffmpeg_proc)
         sink = ffmpeg_proc.stdin
-        log(f"ffmpeg publishing {_codec_label} -> {RTSP_URL}")
+        log(f"ffmpeg publishing {_codec_label} to configured RTSP output")
     elif STDOUT_MODE:
         sink = sys.stdout.buffer
     else:
@@ -343,15 +379,27 @@ async def main():
         xz = buf[:4] == b"XZYH"
         cmdid = (buf[4] | (buf[5] << 8)) if (xz and len(buf) >= 6) else -1
         payload = buf[16:] if xz else buf
+        status = command_error_status(buf)
+        if status == -104:
+            state["failure"] = "owner_account_required"
+            log("NVR denied commands (-104). Use the account that owns the NVR, not a shared/member account.")
+            return
         if cmdid in (1300, 1301, 1303):                      # VIDEO: strip 16B XZYH + 22B media hdr -> Annex-B
+            if len(payload) <= 22:
+                return
+            watchdog.received_frame()
             nal = payload[22:]
             state["vbytes"] += len(nal); state["vframes"] += 1
             try:
+                if ffmpeg_proc and sink.transport.get_write_buffer_size() > MAX_PIPE_BUFFER:
+                    state["failure"] = "video_backpressure"
+                    return
                 sink.write(nal)
                 if hasattr(sink, "flush"): sink.flush()   # StreamWriter (ffmpeg.stdin) has no flush()
             except Exception as e:
-                log("sink write err:", e)
-            if state["vframes"] <= 8 or state["vframes"] % 30 == 0:
+                state["failure"] = "video_sink_failed"
+                log("video output failed:", type(e).__name__)
+            if DEBUG_CAPTURE and (state["vframes"] <= 8 or state["vframes"] % 30 == 0):
                 log(f"VIDEO #{state['vframes']} cmd={cmdid} link={link} payload={len(payload)} "
                     f"nal={payload[:8].hex()} total={state['vbytes']}")
             if state["vframes"] <= 20:
@@ -370,7 +418,7 @@ async def main():
             if DISCOVER and '"dev_list"' in txt and not state["discovered"]:
                 handle_devlist(txt)
             else:
-                log(f"CTRL cmd={cmdid} link={link} len={len(buf)} {txt[:170]}")
+                log(f"CTRL cmd={cmdid} link={link} len={len(buf)}")
             framelog.write(json.dumps({"ctrl": True, "cmd": cmdid, "link": link, "len": len(buf), "txt": txt[:600]}) + "\n"); framelog.flush()
     oracle.on_frame = on_frame
 
@@ -390,9 +438,9 @@ async def main():
         with open(tmp, "w") as fh:
             json.dump(manifest, fh, indent=2)
         os.replace(tmp, out)
-        log(f"DISCOVERED nvr_ip={state['nvr_ip']} sn={STATION_SN}: {len(cams)} camera(s)")
+        log(f"DISCOVERED {len(cams)} camera(s); private metadata saved to the manifest")
         for c in cams:
-            log(f"   ch {c['channel']}: {c['name']!r} (sn {c['sn']}, status {c['status']})")
+            log(f"   ch {c['channel']}: status {c['status']}")
         log(f"wrote {out}")
         state["discovered"] = True
 
@@ -437,10 +485,11 @@ async def main():
     def maybe_start():
         if state["connected"] and state["cmd_dc_open"] and not state["started"]:
             state["started"] = True
-            log(f"connected+DC open; user_id={USER_ID[:8]}.. heartbeat on; starting sequence")
-            asyncio.ensure_future(heartbeat_loop())
-            asyncio.ensure_future(stats_loop())
-            asyncio.ensure_future(start_sequence())
+            log("connected+DC open; heartbeat on; starting sequence")
+            resources.create_task(heartbeat_loop())
+            if os.environ.get("EUFY_LOG_LEVEL") == "debug":
+                resources.create_task(stats_loop())
+            resources.create_task(start_sequence())
 
     def attach(ch, mine):
         @ch.on("open")
@@ -454,12 +503,12 @@ async def main():
             b = bytes(b)
             if len(b) >= 4 and b[0] == 0x50 and b[1] == 0x54 and b[2] == 0x43 and b[3] == 0x53:  # "PTCS"
                 state["ptcs_in"] += 1
-                if state["ptcs_in"] <= 3:
+                if DEBUG_CAPTURE and state["ptcs_in"] <= 3:
                     log(f"PTCS in on {ch.label}: len={len(b)} head={b[:32].hex()}")
                 oracle.push_recv(b)
             else:
                 # heartbeat (1139 @ off24) or other; log a few
-                if state["ptcs_in"] < 2:
+                if DEBUG_CAPTURE and state["ptcs_in"] < 2:
                     log(f"non-PTCS on {ch.label}: len={len(b)} head={b[:28].hex()}")
 
     @pc.on("datachannel")
@@ -482,18 +531,23 @@ async def main():
         async def add_cand(cand):
             try:
                 p = cand.split()
-                if len(p) > 7 and p[6] == "typ" and p[7] == "host" and p[4].startswith("192.168.1.") and not state["nvr_ip"]:
-                    state["nvr_ip"] = p[4]   # the NVR's LAN IP (direct path) from its host ICE candidate
+                if len(p) > 7 and p[6] == "typ" and p[7] == "host" and not state["nvr_ip"] :
+                    try:
+                        is_private = ipaddress.ip_address(p[4]).is_private
+                    except ValueError:
+                        is_private = False
+                    if is_private:
+                        state["nvr_ip"] = p[4]   # the NVR's LAN IP (direct path) from its host ICE candidate
                 c = candidate_from_sdp(cand.split(":", 1)[1]); c.sdpMid = "2"; c.sdpMLineIndex = 0
                 await pc.addIceCandidate(c)
-            except Exception as e: log("addIceCandidate err:", e)
+            except Exception as e: log("addIceCandidate failed:", type(e).__name__)
 
         async def handle(raw):
             inner, d = parse_msg(raw)
             if not isinstance(inner, dict): return
             action = inner.get("action")
             if action == 1:
-                log("join ack:", d); await sig.scall()
+                log("join acknowledged"); await sig.scall()
             elif action == 3 and isinstance(d, dict):
                 if "turn" in d:
                     log("scall/turn status", d.get("status"))
@@ -525,7 +579,7 @@ async def main():
             # below blocks forever and never re-checks state["discovered"]. Poll the flag and
             # close the WS to end the loop; cap the wait so run.sh's retry can take over.
             for _ in range(80):                      # ~40s ceiling
-                if state["discovered"]:
+                if state["discovered"] or state["failure"]:
                     break
                 await asyncio.sleep(0.5)
             try:
@@ -534,8 +588,26 @@ async def main():
                 pass
 
         if DISCOVER:
-            asyncio.create_task(discover_watchdog())
+            resources.create_task(discover_watchdog())
 
+        async def monitor_worker():
+            while True:
+                await asyncio.sleep(1)
+                if oracle.failed or (oracle.proc and oracle.proc.returncode is not None):
+                    state["failure"] = "framing_worker_stopped"
+                if ffmpeg_proc and ffmpeg_proc.returncode is not None:
+                    state["failure"] = "video_process_stopped"
+                if not DISCOVER and not state["failure"]:
+                    state["failure"] = watchdog.failure()
+                if state["failure"]:
+                    log("stream stopped:", state["failure"])
+                    await ws.close()
+                    return
+                if not STREAM_MODE and time.monotonic() - watchdog.started >= RUN_SECS:
+                    await ws.close()
+                    return
+
+        resources.create_task(monitor_worker())
         try:
             async for raw in ws:
                 await handle(raw)
@@ -544,28 +616,21 @@ async def main():
                 if not STREAM_MODE and not DISCOVER and state["vframes"] > 600:
                     log("collected plenty of video; stopping."); break
         except Exception as e:
-            log("ws loop err:", repr(e))
+            state["failure"] = "signaling_failed"
+            log("signaling loop failed:", type(e).__name__)
 
-    await pc.close(); dumpf.close(); framelog.close()
-    if oracle.proc:
-        try: oracle.proc.terminate()
-        except Exception: pass
-    if ffmpeg_proc:
-        try:
-            ffmpeg_proc.stdin.close(); ffmpeg_proc.terminate()
-        except Exception: pass
     log(f"DONE. video frames={state['vframes']} bytes={state['vbytes']} ptcs_in={state['ptcs_in']} "
         f"frames_seen={state['frames_seen']}")
     # In --discover mode only a written manifest counts as success. Returning this lets
     # the caller (the add-on run.sh) tell a real discovery from one that merely timed
     # out — otherwise it logs "Discovery OK" and gen_go2rtc.py dies on a missing file.
-    return (not DISCOVER) or state["discovered"]
+    return not state["failure"] and ((not DISCOVER) or state["discovered"])
 
 if __name__ == "__main__":
     try:
         ok = asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
         ok = True
     if not ok:
-        log("discovery finished without a camera list; cameras.json not written")
+        log("worker did not finish successfully; inspect the preceding status message")
         sys.exit(1)

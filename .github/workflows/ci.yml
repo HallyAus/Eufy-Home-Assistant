@@ -55,7 +55,7 @@ jobs:
         with:
           python-version: '3.14'
       - name: Install pinned Home Assistant test environment
-        run: python -m pip install pytest-homeassistant-custom-component==0.13.363 ha-ffmpeg
+        run: python -m pip install pytest-homeassistant-custom-component==0.13.363 ha-ffmpeg PyTurboJPEG==1.8.3
       - name: Test Home Assistant flows and entities
         run: python -m pytest -q tests/ha --asyncio-mode=auto --junitxml=ha-results.xml
       - uses: actions/upload-artifact@v4

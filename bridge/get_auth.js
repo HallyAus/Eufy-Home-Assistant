@@ -41,7 +41,14 @@ const fs = require("fs");
   if (!out || !out.authToken) { console.error("No ws/sign request seen — make sure you opened the NVR live view."); await ctx.close(); process.exit(1); }
   // grab the encrypted account id from localStorage; the bridge decrypts it (AES passphrase "aes")
   try { out.auid = await page.evaluate(() => localStorage.getItem("auid")); } catch {}
-  fs.writeFileSync(path.join(__dirname, "auth.json"), JSON.stringify(out, null, 2));
-  console.log("Wrote auth.json (token", out.authToken.slice(0, 8) + "..., station", out.stationSn + ").");
+  const authPath = process.env.EUFY_AUTH || path.join(__dirname, "auth.json");
+  const tempPath = authPath + "." + process.pid + ".tmp";
+  try {
+    fs.writeFileSync(tempPath, JSON.stringify(out, null, 2), { mode: 0o600, flag: "wx" });
+    fs.renameSync(tempPath, authPath);
+  } finally {
+    if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+  }
+  console.log("Saved auth session. Keep auth.json and the browser profile private.");
   await ctx.close(); process.exit(0);
-})().catch((e) => { console.error("FATAL", e && e.stack ? e.stack : e); process.exit(1); });
+})().catch((e) => { console.error("Browser authentication failed:", e && e.name ? e.name : "Error"); process.exit(1); });
