@@ -18,7 +18,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install test dependencies
-        run: python -m pip install --upgrade pip pytest pyyaml cryptography
+        run: python -m pip install --upgrade pip pytest pytest-asyncio pyyaml cryptography aiohttp
       - name: Run tests
         run: python -m pytest -q tests
       - name: Compile Python
