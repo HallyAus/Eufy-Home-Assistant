@@ -43,8 +43,11 @@ RUN \
 
 RUN if [ ! -e /usr/bin/python ]; then ln -s /usr/bin/python3 /usr/bin/python; fi
 
+# Use main until the matching GitHub release/tag exists. This keeps Supervisor
+# builds working during the release commit itself; a published release can override
+# REPO_REF with its immutable tag.
 ARG REPO_URL="https://github.com/HallyAus/Eufy-Home-Assistant"
-ARG REPO_REF="v0.7.0"
+ARG REPO_REF="main"
 RUN git clone --depth 1 --branch "${REPO_REF}" "${REPO_URL}" /tmp/repo \
     && mkdir -p /opt/eufy \
     && cp -r /tmp/repo/bridge /opt/eufy/bridge \
