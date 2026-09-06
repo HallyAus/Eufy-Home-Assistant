@@ -138,7 +138,12 @@ def render_config(
     lines = ["# Generated from validated discovery state. Online, on-demand streams.",
              "streams:" if online else "streams: {}"]
     for name, camera in online:
-        command = f"exec:python eufy_stream.py {camera['channel']} --rtsp {{output}}"
+        # v1.9.14+ supports exec starttimeout. Eufy's cold WebRTC handshake can exceed
+        # go2rtc's historical startup window, so allow up to 60s for the first RTSP byte.
+        command = (
+            f"exec:python eufy_stream.py {camera['channel']} --rtsp {{output}}"
+            "#starttimeout=60#killtimeout=5"
+        )
         # Keep one stream per line for the add-on's existing warmer/listing code.
         lines.append(f"  {name}: {json.dumps(command)}")
     for section, port in (("rtsp", rtsp_port), ("api", api_port), ("webrtc", webrtc_port)):
