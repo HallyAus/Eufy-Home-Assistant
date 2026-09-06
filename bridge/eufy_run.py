@@ -64,13 +64,16 @@ def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
 
     # During --discover the only application command is getDeviceList (9100). A
     # shared/member account returns the issue-#8 shape: 16-byte XZYH header plus a
-    # fixed 132-byte non-JSON status payload. Owner accounts return dev_list JSON.
-    # eufy_stream currently decodes non-UTF8 bytes with replacement characters, so
-    # classify by the structural shape rather than attempting to recover lost bytes.
+    # fixed 132-byte non-JSON status payload. A successful status-0 acknowledgement
+    # can have the same 148-byte length but decodes to an empty string; -104 begins
+    # with invalid UTF-8 bytes and therefore contains replacement characters after
+    # eufy_stream's decode(..., "replace"). Require that marker to avoid rejecting
+    # a successful owner/admin account before its subsequent dev_list JSON arrives.
     if (
         discovery
         and "CTRL cmd=1350" in line
         and "len=148" in line
+        and "\ufffd" in line
         and "dev_list" not in line
         and "{" not in line
     ):
@@ -193,13 +196,9 @@ async def main(argv: list[str] | None = None) -> int:
             )
             return 78
 
-        # Discovery is successful only when the engine itself returns success. The
-        # engine already verifies cameras.json was written before returning 0.
         if discovery and rc == 0:
             return 0
 
-        # A live producer normally runs until go2rtc removes the consumer. Preserve
-        # a clean engine exit instead of manufacturing retries after intentional stop.
         if not discovery and rc == 0 and reason == "exit":
             return 0
 
