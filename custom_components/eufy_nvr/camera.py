@@ -27,7 +27,8 @@ from .const import (
     MODEL,
 )
 from .coordinator import EufyNvrCoordinator
-from .go2rtc_api import STREAM_PREFIX, rtsp_url, stream_summary
+from .go2rtc_api import STREAM_PREFIX, api_base_url, rtsp_url, stream_summary
+from .snapshot import SnapshotCache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
         Camera.__init__(self)
 
         self._stream = stream
+        self._snapshot_cache = SnapshotCache()
         self._stream_source = rtsp_url(host, rtsp_port, stream)
 
         self._attr_name = _friendly_name(stream)
@@ -99,7 +101,7 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
             name=DEVICE_NAME,
             manufacturer=MANUFACTURER,
             model=MODEL,
-            configuration_url=f"http://{coordinator.host}:{coordinator.api_port}",
+            configuration_url=api_base_url(coordinator.host, coordinator.api_port),
         )
 
     @property
@@ -114,10 +116,32 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Grab a still frame from the RTSP stream via HA's bundled ffmpeg."""
-        return await async_get_image(
-            self.hass, self._stream_source, width=width, height=height
-        )
+        """Coalesce dashboard thumbnails without repeatedly spawning FFmpeg."""
+        if not self.available:
+            self._snapshot_cache.clear()
+            return None
+
+        async def capture() -> bytes | None:
+            return await async_get_image(
+                self.hass, self._stream_source, width=width, height=height
+            )
+
+        try:
+            image = await self._snapshot_cache.async_get((width, height), capture)
+            if not self.available:
+                self._snapshot_cache.clear()
+                return None
+            return image
+        except Exception as error:
+            # Cancellation is not swallowed (CancelledError is a BaseException).
+            # Avoid logging exception strings that may include RTSP credentials.
+            _LOGGER.debug("Snapshot unavailable (%s)", type(error).__name__)
+            return None
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Drop in-memory images when the integration unloads."""
+        self._snapshot_cache.clear()
+        await super().async_will_remove_from_hass()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
