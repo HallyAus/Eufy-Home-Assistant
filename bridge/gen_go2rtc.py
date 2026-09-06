@@ -138,8 +138,8 @@ def render_config(
     ]
     for name, camera in online:
         command = (
-            f"exec:python eufy_stream.py {camera['channel']} --rtsp {{output}}"
-            f"#starttimeout={STREAM_START_TIMEOUT}#killtimeout=5"
+            f"exec:python eufy_run.py {camera['channel']} --rtsp {{output}}"
+            f"#starttimeout={STREAM_START_TIMEOUT}#killtimeout=8"
         )
         lines.append(f"  {name}: {json.dumps(command)}")
     lines.extend([
@@ -217,7 +217,7 @@ def main(argv: list[str] | None = None) -> int:
         named = generate(manifest_path, output_path, registry_path,
                          api_port=api_port, rtsp_port=rtsp_port, webrtc_port=webrtc_port)
     except FileNotFoundError:
-        print("gen_go2rtc: discovery file or output directory not found; run `python eufy_stream.py --discover` first", file=sys.stderr)
+        print("gen_go2rtc: discovery file or output directory not found; run `python eufy_run.py --discover` first", file=sys.stderr)
         return 1
     except (OSError, ValueError) as error:
         print(f"gen_go2rtc: generation failed: {error}", file=sys.stderr)
