@@ -131,11 +131,28 @@ function buildOpenLive(userId, channelArray) {
   header.writeUInt32LE(payload.length, 6);    // param_len
   header[10] = 0;
   header[11] = 0;                             // segmen
-  header[12] = 255;                          // channel_id
+  header[12] = 255;                           // channel_id
   header[13] = 0;                             // sign_code
   header[14] = 0;                             // is_response
   header[15] = 2;                             // dev_type (cloud=2, matches web app Kt.envType="cloud")
   return Buffer.concat([header, payload]);
+}
+
+// Some NVR failures are not JSON. They are a fixed XZYH control reply whose
+// payload begins with a signed little-endian status and is otherwise zero-filled.
+// -104 is the reproducible authorization response returned to shared/member users.
+function fixedControlStatus(frame) {
+  if (!Buffer.isBuffer(frame) || frame.length < 20 || frame.toString("ascii", 0, 4) !== "XZYH") return null;
+  const cmdId = frame.readUInt16LE(4);
+  if (cmdId === 1032) return null; // channel-status frames use the same int32 shape legitimately
+  const payload = frame.subarray(16);
+  if (payload.length < 4) return null;
+  for (let i = 4; i < payload.length; i++) if (payload[i] !== 0) return null;
+  // Avoid treating normal printable JSON/text prefixes as binary statuses.
+  let binaryPrefix = false;
+  for (let i = 0; i < 4; i++) if (payload[i] < 0x20 || payload[i] > 0x7e) binaryPrefix = true;
+  if (!binaryPrefix) return null;
+  return payload.readInt32LE(0);
 }
 
 const b64 = (buf) => Buffer.from(buf).toString("base64");
@@ -187,7 +204,22 @@ async function serve() {
   const sender = makeManager(Module, 1, 0, { onPacket: (id, buf) => send({ ev: "tx", src: "send", b64: b64(buf) }) });
   const receiver = makeManager(Module, 0, 1, {
     onPacket: (id, buf) => send({ ev: "tx", src: "recv", b64: b64(buf) }),
-    onFrame: (id, link, buf) => send({ ev: "frame", channel: link, b64: b64(buf) }),
+    onFrame: (id, link, buf) => {
+      const status = fixedControlStatus(buf);
+      if (status !== null) {
+        send({ ev: "control_status", channel: link, status });
+        console.error(`[oracle] fixed control status ${status}`);
+        if (status === -104) {
+          console.error("EUFY_AUTHORIZATION_ERROR_-104: NVR rejected application commands. Use the eufy account that owns/administers this NVR; shared/member accounts cannot open NVR command sessions.");
+          // The Python parent otherwise waits for its discovery/signaling watchdog. Terminate it
+          // immediately so the add-on can classify this deterministic auth failure without retries.
+          setTimeout(() => {
+            try { process.kill(process.ppid, "SIGTERM"); } catch (e) {}
+          }, 10);
+        }
+      }
+      send({ ev: "frame", channel: link, b64: b64(buf) });
+    },
   });
   setInterval(() => { try { Module._sctp_frame_manager_on_100ms_timer(receiver, Date.now()); } catch (e) {} }, 100);
 
