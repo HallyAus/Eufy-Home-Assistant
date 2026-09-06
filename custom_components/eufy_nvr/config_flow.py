@@ -29,19 +29,26 @@ from .go2rtc_api import (
     Go2RtcError,
     host_from_internal_url,
     normalize_host,
+    validate_port,
 )
 
 
-async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
+async def _validate_go2rtc(
+    hass, host: str, api_port: int, rtsp_port: int
+) -> tuple[str, int]:
     """Probe go2rtc and return its normalized host and Eufy stream count.
 
     Distinguishes bad input, an unreachable API, and a reachable bridge that has
-    not published any Eufy cameras yet so the setup form can be actionable.
+    not published any Eufy cameras yet so the setup form can be actionable. Both
+    ports are validated before an entry can be created so bad values cannot fail
+    later during entity setup.
     """
     session = async_get_clientsession(hass)
     try:
         normalized_host = normalize_host(host)
-    except ValueError as err:
+        validated_api_port = validate_port(api_port)
+        validate_port(rtsp_port)
+    except (TypeError, ValueError) as err:
         raise InvalidEndpoint from err
 
     candidates = [normalized_host]
@@ -52,7 +59,9 @@ async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
 
     last_error: Go2RtcError | None = None
     for candidate in candidates:
-        client = Go2RtcClient(session, candidate, api_port, REQUEST_TIMEOUT)
+        client = Go2RtcClient(
+            session, candidate, validated_api_port, REQUEST_TIMEOUT
+        )
         try:
             streams = await client.async_get_streams()
         except Go2RtcError as err:
@@ -71,15 +80,16 @@ async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
 
 def _schema(defaults: dict[str, Any]) -> vol.Schema:
     """Build the form schema with the given defaults."""
+    port = vol.All(int, vol.Range(min=1, max=65535))
     return vol.Schema(
         {
             vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, DEFAULT_HOST)): str,
             vol.Required(
                 CONF_API_PORT, default=defaults.get(CONF_API_PORT, DEFAULT_API_PORT)
-            ): int,
+            ): port,
             vol.Required(
                 CONF_RTSP_PORT, default=defaults.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)
-            ): int,
+            ): port,
         }
     )
 
@@ -101,7 +111,9 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
             rtsp_port = user_input[CONF_RTSP_PORT]
 
             try:
-                host, _ = await _validate_go2rtc(self.hass, host, api_port)
+                host, _ = await _validate_go2rtc(
+                    self.hass, host, api_port, rtsp_port
+                )
             except InvalidEndpoint:
                 errors["base"] = "invalid_endpoint"
             except CannotConnect:
@@ -139,8 +151,11 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST]
             api_port = user_input[CONF_API_PORT]
+            rtsp_port = user_input[CONF_RTSP_PORT]
             try:
-                host, _ = await _validate_go2rtc(self.hass, host, api_port)
+                host, _ = await _validate_go2rtc(
+                    self.hass, host, api_port, rtsp_port
+                )
             except InvalidEndpoint:
                 errors["base"] = "invalid_endpoint"
             except CannotConnect:
@@ -155,13 +170,13 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
                     data_updates={
                         CONF_HOST: host,
                         CONF_API_PORT: api_port,
-                        CONF_RTSP_PORT: user_input[CONF_RTSP_PORT],
+                        CONF_RTSP_PORT: rtsp_port,
                     },
                 )
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=_schema(dict(entry.data)),
+            data_schema=_schema(user_input or dict(entry.data)),
             errors=errors,
         )
 
