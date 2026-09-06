@@ -17,7 +17,7 @@ const isWin = process.platform === "win32";
 const arch = process.arch === "arm64" ? "arm64" : "amd64";
 // Keep this aligned with security.eufy.com's current web-client versionControl.
 // These files are runtime-critical: a missing worker must fail the image build.
-const SCTP_VERSION = "0_0_2";
+const SCTP_VERSION = "0_0_4";
 
 function dl(url, dest) {
   return new Promise((res, rej) => {

@@ -74,8 +74,8 @@ chmod 600 "${EUFY_AUTH}" 2>/dev/null || true
 bashio::log.info "Credentials kept out of logs; runtime state is persisted under /data."
 
 # Sanity-check the worker WASM the SCTP oracle needs (fetched at build time).
-if [ ! -s "${BRIDGE_DIR}/worker/libsctp_0_0_2.js" ] || [ ! -s "${BRIDGE_DIR}/worker/libsctp_0_0_2.wasm" ]; then
-    bashio::log.fatal "Required eufy libsctp 0_0_2 runtime assets are missing; the image is invalid."
+if [ ! -s "${BRIDGE_DIR}/worker/libsctp_0_0_4.js" ] || [ ! -s "${BRIDGE_DIR}/worker/libsctp_0_0_4.wasm" ]; then
+    bashio::log.fatal "Required eufy libsctp 0_0_4 runtime assets are missing; the image is invalid."
     exit 1
 fi
 if [ ! -x "${BRIDGE_DIR}/bin/go2rtc" ]; then
