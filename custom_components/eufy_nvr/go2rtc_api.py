@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -31,6 +32,10 @@ def validate_port(port: int) -> int:
 
 def normalize_host(value: str) -> str:
     """Normalize an IP/hostname or a bare HTTP URL to a host value."""
+    if not isinstance(value, str):
+        raise ValueError("host must be a string")
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
+        raise ValueError("host cannot contain control characters")
     raw = value.strip()
     if not raw:
         raise ValueError("host is required")
@@ -50,7 +55,7 @@ def normalize_host(value: str) -> str:
             raise ValueError(
                 "enter a host or a bare http://host URL without a port or path"
             )
-        raw = parsed.hostname
+        raw = parsed.hostname.replace("%25", "%", 1)
     elif raw.startswith("[") and raw.endswith("]"):
         raw = raw[1:-1]
     elif any(character in raw for character in "/?#@"):
@@ -60,12 +65,24 @@ def normalize_host(value: str) -> str:
 
     if ":" in raw:
         try:
-            ipaddress.IPv6Address(raw)
+            address, separator, scope = raw.partition("%")
+            if separator and (not scope or not re.fullmatch(r"[A-Za-z0-9_.-]+", scope)):
+                raise ValueError("invalid IPv6 scope")
+            raw = ipaddress.IPv6Address(address).compressed
+            return raw + (separator + scope if separator else "")
         except ValueError as err:
             raise ValueError("invalid IPv6 address") from err
-    elif not raw or any(character.isspace() for character in raw):
-        raise ValueError("invalid host")
-    return raw.lower()
+    else:
+        try:
+            raw = raw.rstrip(".").encode("idna").decode("ascii").lower()
+        except UnicodeError as err:
+            raise ValueError("invalid host") from err
+        if not raw or len(raw) > 253 or any(
+            not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
+            for label in raw.split(".")
+        ):
+            raise ValueError("invalid host")
+    return raw
 
 
 def host_from_internal_url(value: str | None) -> str | None:
@@ -91,12 +108,20 @@ def host_from_internal_url(value: str | None) -> str | None:
 
 def _url_host(host: str) -> str:
     normalized = normalize_host(host)
-    return f"[{normalized}]" if ":" in normalized else normalized
+    if ":" in normalized:
+        normalized = normalized.replace("%", "%25", 1)
+        return f"[{normalized}]"
+    return normalized
+
+
+def api_base_url(host: str, port: int) -> str:
+    """Build the management URL, including brackets for IPv6 literals."""
+    return f"http://{_url_host(host)}:{validate_port(port)}"
 
 
 def api_url(host: str, port: int) -> str:
     """Build the go2rtc streams API URL."""
-    return f"http://{_url_host(host)}:{validate_port(port)}{API_STREAMS_PATH}"
+    return f"{api_base_url(host, port)}{API_STREAMS_PATH}"
 
 
 def rtsp_url(host: str, port: int, stream: str) -> str:
