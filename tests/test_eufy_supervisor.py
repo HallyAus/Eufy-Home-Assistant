@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("eufy_run", ROOT / "bridge/eufy_run.py")
 supervisor = importlib.util.module_from_spec(SPEC)
+# Python 3.13's dataclasses implementation resolves annotations through
+# sys.modules while the class decorator runs, matching normal import semantics.
+sys.modules[SPEC.name] = supervisor
 SPEC.loader.exec_module(supervisor)
 
 
