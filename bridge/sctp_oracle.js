@@ -15,7 +15,7 @@ const fs = require("fs");
 const path = require("path");
 
 const WDIR = path.join(__dirname, "worker");   // eufy libsctp files, fetched by fetch_deps.js
-const SCTP_VERSION = "0_0_2";
+const SCTP_VERSION = "0_0_4";
 const GLUE = path.join(WDIR, `libsctp_${SCTP_VERSION}.js`);
 const WASM = path.join(WDIR, `libsctp_${SCTP_VERSION}.wasm`);
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -18,6 +19,10 @@ class Go2RtcConnectionError(Go2RtcError):
     """Raised when the go2rtc endpoint cannot be reached."""
 
 
+class Go2RtcAuthenticationError(Go2RtcError):
+    """Raised when the API requires authentication or denies access."""
+
+
 class Go2RtcPayloadError(Go2RtcError):
     """Raised when go2rtc returns an unexpected response."""
 
@@ -31,9 +36,14 @@ def validate_port(port: int) -> int:
 
 def normalize_host(value: str) -> str:
     """Normalize an IP/hostname or a bare HTTP URL to a host value."""
+    if not isinstance(value, str):
+        raise ValueError("host must be a string")
     raw = value.strip()
     if not raw:
         raise ValueError("host is required")
+
+    if any(ord(character) < 33 for character in raw):
+        raise ValueError("host cannot contain whitespace or control characters")
 
     if "://" in raw:
         parsed = urlsplit(raw)
@@ -58,13 +68,23 @@ def normalize_host(value: str) -> str:
     elif raw.count(":") == 1:
         raise ValueError("enter the API port in the separate port field")
 
+    if any(ord(character) < 33 for character in raw):
+        raise ValueError("host cannot contain whitespace or control characters")
     if ":" in raw:
         try:
-            ipaddress.IPv6Address(raw)
+            raw = str(ipaddress.IPv6Address(raw))
         except ValueError as err:
             raise ValueError("invalid IPv6 address") from err
-    elif not raw or any(character.isspace() for character in raw):
-        raise ValueError("invalid host")
+    else:
+        try:
+            raw = str(ipaddress.IPv4Address(raw))
+        except ValueError:
+            raw = raw.rstrip(".")
+            if not raw or len(raw) > 253 or not all(
+                re.fullmatch(r"[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?", label)
+                for label in raw.split(".")
+            ):
+                raise ValueError("invalid hostname") from None
     return raw.lower()
 
 
@@ -106,7 +126,9 @@ def rtsp_url(host: str, port: int, stream: str) -> str:
 
 def _stream_map(payload: Any) -> dict[str, dict[str, Any]]:
     """Normalize either supported go2rtc response shape."""
-    if isinstance(payload, dict) and "streams" in payload:
+    if isinstance(payload, dict) and "streams" in payload and not any(
+        isinstance(key, str) and key.startswith(STREAM_PREFIX) for key in payload
+    ):
         payload = payload["streams"]
     if not isinstance(payload, dict):
         raise ValueError("go2rtc streams response is not an object")
@@ -167,20 +189,26 @@ class Go2RtcClient:
         from aiohttp import ClientError, ClientResponseError
 
         try:
-            async with self._session.get(self.url, timeout=self._timeout) as response:
+            async with self._session.get(
+                self.url, timeout=self._timeout, allow_redirects=False
+            ) as response:
+                if 300 <= response.status < 400:
+                    raise Go2RtcPayloadError("go2rtc redirects are not supported")
                 response.raise_for_status()
                 payload = await response.json(content_type=None)
         except ClientResponseError as err:
+            if err.status in (401, 403):
+                raise Go2RtcAuthenticationError("go2rtc API access was denied") from err
             raise Go2RtcConnectionError(
-                f"go2rtc returned HTTP {err.status} from {self.url}"
+                f"go2rtc returned HTTP {err.status}"
             ) from err
         except (ClientError, TimeoutError) as err:
             raise Go2RtcConnectionError(
-                f"cannot reach go2rtc at {self.url}: {err}"
+                "cannot reach the configured go2rtc endpoint"
             ) from err
         except ValueError as err:
             raise Go2RtcPayloadError(
-                f"go2rtc returned invalid JSON from {self.url}"
+                "go2rtc returned invalid JSON"
             ) from err
 
         try:
@@ -188,5 +216,5 @@ class Go2RtcClient:
             return extract_streams(payload)
         except ValueError as err:
             raise Go2RtcPayloadError(
-                f"unexpected go2rtc response from {self.url}"
+                "go2rtc returned an unexpected response"
             ) from err

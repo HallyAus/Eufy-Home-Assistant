@@ -36,3 +36,13 @@ REQUEST_TIMEOUT = 10
 MANUFACTURER = "eufy"
 MODEL = "PoE NVR (S4 / T8N00)"
 DEVICE_NAME = "Eufy NVR"
+
+# Viewer-triggered snapshot cache and metadata polling (neither keeps video warm).
+CONF_SCAN_INTERVAL = "scan_interval"
+CONF_SNAPSHOT_INTERVAL = "snapshot_interval"
+DEFAULT_SCAN_INTERVAL = 30
+DEFAULT_SNAPSHOT_INTERVAL = 30
+MIN_SCAN_INTERVAL = 10
+MAX_SCAN_INTERVAL = 300
+MIN_SNAPSHOT_INTERVAL = 5
+MAX_SNAPSHOT_INTERVAL = 300

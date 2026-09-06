@@ -19,7 +19,7 @@ from .coordinator import EufyNvrCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.CAMERA]
+PLATFORMS: list[Platform] = [Platform.CAMERA, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.BUTTON]
 
 # Typed config entry so ``entry.runtime_data`` carries the coordinator (HA 2024.11+).
 type EufyNvrConfigEntry = ConfigEntry[EufyNvrCoordinator]

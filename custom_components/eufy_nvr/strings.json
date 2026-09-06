@@ -29,7 +29,10 @@
       "cannot_connect": "Could not reach go2rtc at that host/port. Check that the Eufy NVR add-on or bridge is running and the go2rtc API port is correct.",
       "invalid_endpoint": "Enter a valid hostname or IP address, with API and RTSP ports in their separate fields.",
       "wrong_instance": "That address is another go2rtc instance containing non-Eufy streams—usually Home Assistant's built-in server on port 1984. Use the Eufy add-on API port 1985.",
-      "no_streams": "go2rtc is reachable, but it has not published any eufy_* cameras. Finish add-on discovery or check its log, then try again."
+      "no_streams": "go2rtc is reachable, but it has not published any eufy_* cameras. Finish add-on discovery or check its log, then try again.",
+      "auth_required": "go2rtc denied API access (HTTP 401/403). This integration currently requires a trusted-LAN endpoint without API authentication. Do not expose it to the internet.",
+      "invalid_response": "The endpoint did not return a valid go2rtc streams response. Check the API port and any proxy configuration.",
+      "already_configured": "Another Eufy NVR integration already uses this host and API port."
     },
     "abort": {
       "already_configured": "This go2rtc endpoint is already configured.",
@@ -40,10 +43,52 @@
     "camera": {
       "eufy_nvr": {
         "state_attributes": {
-          "stream_name": { "name": "Stream name" },
-          "producers": { "name": "Producers" },
-          "consumers": { "name": "Consumers" },
-          "streaming": { "name": "Streaming" }
+          "stream_name": {
+            "name": "Stream name"
+          },
+          "producers": {
+            "name": "Producers"
+          },
+          "consumers": {
+            "name": "Consumers"
+          },
+          "streaming": {
+            "name": "Streaming"
+          }
+        }
+      }
+    },
+    "sensor": {
+      "configured_streams": {
+        "name": "Configured streams"
+      },
+      "active_consumers": {
+        "name": "Active stream consumers"
+      }
+    },
+    "binary_sensor": {
+      "bridge_connection": {
+        "name": "Bridge connection"
+      }
+    },
+    "button": {
+      "refresh_streams": {
+        "name": "Refresh published streams"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Eufy NVR performance",
+        "description": "These settings only affect local metadata and viewer-requested thumbnails. They do not keep live streams running.",
+        "data": {
+          "scan_interval": "Stream discovery interval (seconds)",
+          "snapshot_interval": "Thumbnail cache duration (seconds)"
+        },
+        "data_description": {
+          "scan_interval": "How often to read the stream list (10–300 seconds). This does not rediscover physical NVR channels.",
+          "snapshot_interval": "Reuse the most recent thumbnail for 5–300 seconds. A new size is fetched on demand; failed or unavailable cameras do not serve old images."
         }
       }
     }

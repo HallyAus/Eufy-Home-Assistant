@@ -9,6 +9,7 @@ entity automatically — no YAML, no re-config.
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -21,7 +22,8 @@ from .const import (
     CONF_HOST,
     DOMAIN,
     REQUEST_TIMEOUT,
-    UPDATE_INTERVAL,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_SCAN_INTERVAL,
 )
 from .go2rtc_api import Go2RtcClient, Go2RtcError
 
@@ -46,6 +48,8 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             entry.data[CONF_API_PORT],
             REQUEST_TIMEOUT,
         )
+        self.consecutive_failures = 0
+        self.successful_polls = 0
         self.host = self._client.host
         self.api_port = self._client.api_port
 
@@ -53,7 +57,9 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             hass,
             _LOGGER,
             name=f"{DOMAIN} ({self.host})",
-            update_interval=UPDATE_INTERVAL,
+            update_interval=timedelta(seconds=entry.options.get(
+                CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+            )),
             config_entry=entry,
         )
 
@@ -66,8 +72,11 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         try:
             streams = await self._client.async_get_streams()
         except Go2RtcError as err:
+            self.consecutive_failures += 1
             raise UpdateFailed(str(err)) from err
 
+        self.consecutive_failures = 0
+        self.successful_polls += 1
         _LOGGER.debug(
             "Discovered %d eufy stream(s) from %s: %s",
             len(streams),

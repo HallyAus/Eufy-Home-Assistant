@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.9
+
+- Update eufy's required SCTP framing runtime from the removed `0_0_2` CDN assets to the current
+  `0_0_4` files used by the web client. Build-time and startup checks now require the matching JS/WASM
+  assets so an image cannot ship with a stale framing runtime.
+
 ## 0.6.8
 
 - Persist the discovered camera manifest under `/data` (new `EUFY_CAMERAS` override, mirroring
