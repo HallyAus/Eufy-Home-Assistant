@@ -1,0 +1,93 @@
+name: Bug report
+description: Report an add-on, discovery, stream, or Home Assistant integration problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please remove passwords, auth tokens, gtoken values, serial numbers you do not want public, and private network details you do not want to share.
+  - type: input
+    id: version
+    attributes:
+      label: Eufy NVR Local version
+      placeholder: 0.6.9
+    validations:
+      required: true
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant Core / OS version
+      placeholder: Core 2026.8.2 / OS 18.2
+    validations:
+      required: true
+  - type: input
+    id: nvr
+    attributes:
+      label: NVR / camera model
+      placeholder: T8N00 S4 Max with T8P00 cameras
+    validations:
+      required: true
+  - type: dropdown
+    id: account_role
+    attributes:
+      label: Eufy account role on the NVR
+      description: Shared/member accounts can authenticate but may be rejected by the NVR for device commands.
+      options:
+        - Owner/admin account that set up the NVR
+        - Shared/member account
+        - Unsure
+    validations:
+      required: true
+  - type: input
+    id: region
+    attributes:
+      label: Region / country
+      placeholder: EU / IE
+    validations:
+      required: true
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Where does it fail?
+      options:
+        - Login/authentication
+        - NVR/camera discovery
+        - SDP / TURN / ICE negotiation
+        - Camera stream starts but has no video
+        - go2rtc stream timeout
+        - Home Assistant camera entity / snapshot
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Include the sequence from login through the first failure. Redact credentials/tokens.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I tested with the NVR owner/admin account or stated above that I cannot.
+          required: true
+        - label: I checked existing issues for the same failure signature.
+          required: true
+        - label: I removed passwords and authentication tokens from the logs.
+          required: true
