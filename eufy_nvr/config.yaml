@@ -1,5 +1,5 @@
 name: Eufy NVR Local (experimental)
-version: "0.6.9"
+version: "0.7.0"
 slug: eufy_nvr
 description: Local live video from a eufy PoE NVR (S4 / T8N00) over reversed WebRTC, served as RTSP/WebRTC for Home Assistant. No cloud media, no Frigate.
 url: https://github.com/HallyAus/Eufy-Home-Assistant
@@ -38,7 +38,9 @@ ports_description:
   8557/tcp: WebRTC (TCP candidate)
   8557/udp: WebRTC (UDP candidate)
 
-# --- Auth (v0.4): headless email/password login (no token paste) ---------------
+# --- Auth: headless email/password login (no token paste) ---------------------
+# IMPORTANT: use the eufy account that OWNS/administers the NVR. Shared/member accounts can
+# authenticate and resolve the station but the NVR may reject control commands with status -104.
 # run.sh runs auth_login.py, which logs into the eufy passport (reversed ECDH+AES login --
 # the body's password is ECDH/AES-256-CBC encrypted and the whole request rides the openapi
 # ECDH share-key wrapper; see bridge/eufy_cloud.py), derives the NVR station_sn from the
