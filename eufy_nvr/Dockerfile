@@ -2,7 +2,7 @@ ARG BUILD_FROM
 FROM ${BUILD_FROM}
 
 # go2rtc version is injected from build.yaml (args:) so the build is reproducible (no "latest").
-ARG GO2RTC_VERSION="v1.9.9"
+ARG GO2RTC_VERSION="v1.9.14"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
