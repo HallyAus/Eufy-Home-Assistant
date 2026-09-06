@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1
+
+- Add `eufy_run.py`, a process supervisor around the reversed WebRTC engine. It opens fresh signaling
+  sessions when scall/TURN stalls without an SDP offer, retries a producer that never reaches its first
+  video frame, and restarts a stream that stops producing frames while go2rtc itself remains healthy.
+- Own the complete oracle/ffmpeg/engine process group so failed or stalled sessions are terminated as a
+  unit before retry, preventing abandoned camera producers from accumulating.
+- Route generated go2rtc producers and add-on discovery through the supervisor while retaining go2rtc's
+  60-second startup allowance and bounded kill timeout.
+- Detect the fixed 148-byte non-JSON command-rejection shape reported by shared/member accounts during
+  discovery and emit an explicit owner/admin-account diagnostic instead of retrying a permission failure.
+- Add offline regression coverage for signaling state, video progress/stall markers, authorization
+  classification, and supervised producer generation.
+
 ## 0.7.0
 
 - Harden discovery/config generation with persistent collision-safe stream identities, strict manifest and
