@@ -56,6 +56,16 @@ def test_discovery_fixed_status_reply_is_classified_as_authorization_failure():
     assert current.authorization_rejection is True
 
 
+def test_success_status_zero_ack_is_not_authorization_failure():
+    current = state()
+    supervisor.inspect_log_line(
+        "[12:00:00] CTRL cmd=1350 link=1 len=148 ",
+        current,
+        True,
+    )
+    assert current.authorization_rejection is False
+
+
 def test_json_control_reply_is_not_classified_as_authorization_failure():
     current = state()
     supervisor.inspect_log_line(
