@@ -87,7 +87,10 @@ HEADERS = {
 os.makedirs(os.path.join(ROOT, "_debug"), exist_ok=True)
 VIDEO_DUMP = os.path.join(ROOT, "_debug", "video_dump.bin")
 FRAMES_LOG = os.path.join(ROOT, "_debug", "frames.jsonl")
-CAMERAS_JSON = os.path.join(ROOT, "cameras.json")
+# Discovery manifest. Like EUFY_AUTH, the add-on points this at /data so the
+# discovered camera list survives a container restart/rebuild and gen_go2rtc.py
+# reads it from the exact same place; default to the bridge dir for standalone runs.
+CAMERAS_JSON = os.environ.get("EUFY_CAMERAS", os.path.join(ROOT, "cameras.json"))
 
 STDOUT_MODE = os.environ.get("EUFY_STDOUT") == "1"   # write clean Annex-B to stdout (for go2rtc/ffmpeg exec source)
 def now(): return int(time.time())
@@ -381,7 +384,12 @@ async def main():
                  "status": d.get("status"), "dev_type": d.get("dev_type")} for d in dl]
         manifest = {"nvr_sn": STATION_SN, "nvr_ip": state["nvr_ip"], "cameras": cams}
         out = CAMERAS_JSON
-        json.dump(manifest, open(out, "w"), indent=2)
+        # Write-then-rename (like auth_login.py) so gen_go2rtc.py, or a fallback that
+        # reuses the persisted /data copy, never sees a half-written manifest.
+        tmp = out + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(manifest, fh, indent=2)
+        os.replace(tmp, out)
         log(f"DISCOVERED nvr_ip={state['nvr_ip']} sn={STATION_SN}: {len(cams)} camera(s)")
         for c in cams:
             log(f"   ch {c['channel']}: {c['name']!r} (sn {c['sn']}, status {c['status']})")
@@ -548,9 +556,16 @@ async def main():
         except Exception: pass
     log(f"DONE. video frames={state['vframes']} bytes={state['vbytes']} ptcs_in={state['ptcs_in']} "
         f"frames_seen={state['frames_seen']}")
+    # In --discover mode only a written manifest counts as success. Returning this lets
+    # the caller (the add-on run.sh) tell a real discovery from one that merely timed
+    # out — otherwise it logs "Discovery OK" and gen_go2rtc.py dies on a missing file.
+    return (not DISCOVER) or state["discovered"]
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        ok = asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        ok = True
+    if not ok:
+        log("discovery finished without a camera list; cameras.json not written")
+        sys.exit(1)

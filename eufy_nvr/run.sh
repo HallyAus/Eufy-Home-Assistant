@@ -45,6 +45,10 @@ export EUFY_EMAIL="$(bashio::config 'email')"
 export EUFY_PASSWORD="$(bashio::config 'password')"
 export EUFY_REGION="$(bashio::config 'region' 'US')"
 export EUFY_AUTH="${STATE_DIR}/auth.json"
+# Persist the discovered camera manifest alongside auth.json. eufy_stream.py writes it
+# here and gen_go2rtc.py reads it from here, so a container rebuild/restart keeps the
+# last known camera list for the discovery-failure fallback below.
+export EUFY_CAMERAS="${STATE_DIR}/cameras.json"
 if bashio::config.has_value 'country'; then export EUFY_COUNTRY="$(bashio::config 'country')"; fi
 if bashio::config.has_value 'station_sn'; then export EUFY_STATION_SN="$(bashio::config 'station_sn')"; fi
 if bashio::config.has_value 'captcha_id'; then export EUFY_CAPTCHA_ID="$(bashio::config 'captcha_id')"; fi
@@ -89,13 +93,12 @@ discover_and_generate() {
     local attempt
     for attempt in 1 2 3; do
         bashio::log.info "Auto-discovering NVR + cameras (cmd 9100), attempt ${attempt}/3..."
-        if python3 eufy_stream.py --discover; then
-            bashio::log.info "Discovery OK -> cameras.json"
+        # eufy_stream.py --discover now writes straight to ${EUFY_CAMERAS} and exits
+        # non-zero if it never got a camera list; the -s check is a belt-and-braces guard.
+        if python3 eufy_stream.py --discover && [ -s "${EUFY_CAMERAS}" ]; then
+            bashio::log.info "Discovery OK -> ${EUFY_CAMERAS}"
             if python3 gen_go2rtc.py "127.0.0.1"; then
                 install -m 600 "${BRIDGE_DIR}/go2rtc.yaml" "${CONFIG_PATH}"
-                if [ -f "${BRIDGE_DIR}/cameras.json" ]; then
-                    install -m 600 "${BRIDGE_DIR}/cameras.json" "${STATE_DIR}/cameras.json"
-                fi
                 bashio::log.info "Generated go2rtc.yaml from discovered cameras."
                 return 0
             fi
@@ -109,7 +112,10 @@ discover_and_generate() {
 }
 
 if ! discover_and_generate; then
-    if [ -f "${CONFIG_PATH}" ]; then
+    if [ -s "${EUFY_CAMERAS}" ] && python3 gen_go2rtc.py "127.0.0.1"; then
+        install -m 600 "${BRIDGE_DIR}/go2rtc.yaml" "${CONFIG_PATH}"
+        bashio::log.warning "Discovery failed; regenerated go2rtc.yaml from the last discovered camera list (${EUFY_CAMERAS})."
+    elif [ -f "${CONFIG_PATH}" ]; then
         bashio::log.warning "Discovery failed but a previous go2rtc.yaml exists — starting with it."
     else
         bashio::log.fatal "Could not discover cameras and no cached go2rtc.yaml is present. Aborting."

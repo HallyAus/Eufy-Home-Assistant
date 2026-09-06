@@ -1,7 +1,7 @@
 {
   "domain": "eufy_nvr",
   "name": "Eufy NVR (local)",
-  "version": "0.6.7",
+  "version": "0.6.8",
   "documentation": "https://github.com/HallyAus/Eufy-Home-Assistant",
   "issue_tracker": "https://github.com/HallyAus/Eufy-Home-Assistant/issues",
   "codeowners": ["@HallyAus"],

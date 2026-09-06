@@ -41,6 +41,8 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn('EUFY_AUTH="${STATE_DIR}/auth.json"', run_script)
         self.assertIn('if [ -s "${EUFY_AUTH}" ]', run_script)
         self.assertNotIn('rm -f "${EUFY_AUTH}"', run_script)
+        self.assertIn('EUFY_CAMERAS="${STATE_DIR}/cameras.json"', run_script)
+        self.assertIn('[ -s "${EUFY_CAMERAS}" ]', run_script)
 
     def test_addon_uses_ports_dedicated_to_eufy(self):
         config = (ROOT / "eufy_nvr/config.yaml").read_text()

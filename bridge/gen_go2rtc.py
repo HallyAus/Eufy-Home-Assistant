@@ -12,13 +12,23 @@ import re
 import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))  # bridge/
+# Same override the discovery step (eufy_stream.py) and the add-on's run.sh use, so
+# both ends agree on the path even when the manifest is persisted under /data.
+CAMERAS_JSON = os.environ.get("EUFY_CAMERAS", os.path.join(ROOT, "cameras.json"))
 BRIDGE_IP = os.environ.get(
     "BRIDGE_IP", sys.argv[1] if len(sys.argv) > 1 else "BRIDGE_IP"
 )
 API_PORT = int(os.environ.get("GO2RTC_API_PORT", "1984"))
 RTSP_PORT = int(os.environ.get("GO2RTC_RTSP_PORT", "8554"))
 WEBRTC_PORT = int(os.environ.get("GO2RTC_WEBRTC_PORT", "8555"))
-cams = json.load(open(os.path.join(ROOT, "cameras.json")))
+try:
+    with open(CAMERAS_JSON) as _f:
+        cams = json.load(_f)
+except FileNotFoundError:
+    sys.exit(
+        f"gen_go2rtc: {CAMERAS_JSON} not found "
+        "- run `python eufy_stream.py --discover` first"
+    )
 
 
 def slug(name, ch):

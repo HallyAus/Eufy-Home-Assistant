@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.8
+
+- Persist the discovered camera manifest under `/data` (new `EUFY_CAMERAS` override, mirroring
+  `EUFY_AUTH`) so `eufy_stream.py --discover` and `gen_go2rtc.py` always agree on its location and
+  the list survives a container restart/rebuild.
+- Make `eufy_stream.py --discover` exit non-zero when it never received a camera list, instead of
+  reporting "Discovery OK" and letting `gen_go2rtc.py` crash with `FileNotFoundError` on the missing
+  `cameras.json`. Write the manifest atomically.
+- When discovery keeps failing, regenerate `go2rtc.yaml` from the last persisted camera list before
+  falling back to the previous `go2rtc.yaml`.
+
 ## 0.6.7
 
 - Refresh the eufy auth session periodically even when `keep_warm` is disabled, and replace the auth
