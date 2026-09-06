@@ -54,7 +54,9 @@ def test_rename_and_channel_move_preserve_identity(tmp_path):
     paths[0].write_text(json.dumps(manifest(camera(4, "New Name", "CAM1"))))
     second = gen.generate(*paths)
     assert first[0][0] == second[0][0] == "eufy_garage"
-    assert "eufy_stream.py 4 --rtsp" in paths[1].read_text()
+    config = paths[1].read_text()
+    assert "eufy_run.py 4 --rtsp" in config
+    assert "#starttimeout=60#killtimeout=8" in config
 
 
 def test_removed_camera_name_cannot_be_hijacked(tmp_path):
