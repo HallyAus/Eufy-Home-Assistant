@@ -3,6 +3,8 @@ import re
 import unittest
 from pathlib import Path
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -21,12 +23,18 @@ class ReleasePackagingTest(unittest.TestCase):
             1
         )
         dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
+        build = yaml.safe_load((ROOT / "eufy_nvr/build.yaml").read_text())
 
         self.assertEqual(addon_version, manifest_version)
-        # The release commit must remain buildable before its matching GitHub tag
-        # exists. Published release builds can override REPO_REF with the immutable tag.
-        self.assertIn('ARG REPO_REF="main"', dockerfile)
-        self.assertIn('git clone --depth 1 --branch "${REPO_REF}"', dockerfile)
+        commit = re.search(
+            r'^ARG REPO_COMMIT="([0-9a-f]{40})"$', dockerfile, re.MULTILINE
+        ).group(1)
+        self.assertRegex(commit, r"^[0-9a-f]{40}$")
+        self.assertIn('fetch --quiet --depth 1 origin "${REPO_COMMIT}"', dockerfile)
+        self.assertNotIn('REPO_REF="main"', dockerfile)
+        self.assertNotIn("releases/latest", dockerfile)
+        for image in build["build_from"].values():
+            self.assertRegex(image, r"@sha256:[0-9a-f]{64}$")
 
     def test_addon_recovers_after_a_host_restart(self):
         config = (ROOT / "eufy_nvr/config.yaml").read_text()

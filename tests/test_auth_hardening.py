@@ -131,4 +131,3 @@ def test_legacy_or_incomplete_cache_is_never_used_as_fallback(tmp_path: Path):
     assert not auth_login.cache_matches(
         str(cache), "owner@example.com", "us-pr", "US"
     )
-

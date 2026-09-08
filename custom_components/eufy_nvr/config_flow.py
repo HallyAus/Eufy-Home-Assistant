@@ -8,6 +8,7 @@ entry, so misconfiguration is caught immediately.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
@@ -104,6 +105,18 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")
             ): vol.All(str, vol.Length(min=16, max=256)),
+        }
+    )
+
+
+def _credentials_schema(defaults: Mapping[str, Any]) -> vol.Schema:
+    """Build the credential-only schema used by guided reauthentication."""
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_USERNAME, default=defaults.get(CONF_USERNAME, DEFAULT_USERNAME)
+            ): vol.All(str, vol.Length(min=1, max=64)),
+            vol.Required(CONF_PASSWORD): vol.All(str, vol.Length(min=16, max=256)),
         }
     )
 
@@ -224,6 +237,51 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=_schema(user_input or dict(entry.data)),
+            errors=errors,
+        )
+
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Request local credentials after an authentication setup failure."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Validate replacement credentials against the configured endpoint."""
+        entry = self._get_reauth_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                await _validate_go2rtc(
+                    self.hass,
+                    entry.data[CONF_HOST],
+                    entry.data[CONF_API_PORT],
+                    user_input[CONF_USERNAME],
+                    user_input[CONF_PASSWORD],
+                )
+            except InvalidEndpoint:
+                errors["base"] = "invalid_endpoint"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except WrongInstance:
+                errors["base"] = "wrong_instance"
+            except NoStreams:
+                errors["base"] = "no_streams"
+            else:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={
+                        CONF_USERNAME: user_input[CONF_USERNAME],
+                        CONF_PASSWORD: user_input[CONF_PASSWORD],
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=_credentials_schema(user_input or entry.data),
             errors=errors,
         )
 

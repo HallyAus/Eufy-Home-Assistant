@@ -5,9 +5,9 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** v0.7 adds stable camera identities, safer generated configuration,
-> improved Home Assistant endpoint handling, snapshot coalescing, go2rtc 1.9.14, and a longer
-> cold-stream startup window. The HACS integration, **"Eufy NVR (local)"**, auto-creates the camera
+> **Status: experimental.** v0.7.2 adds Eufy mailbox/device verification, account-bound auth caches,
+> authenticated LAN access, stricter process supervision, and verified immutable build inputs. The
+> HACS integration, **"Eufy NVR (local)"**, auto-creates the camera
 > entities from the bridge's go2rtc; install it separately from this repo.
 
 ## What it runs
@@ -31,13 +31,18 @@ cloud; the video itself is pulled LAN-direct from the NVR.
    - `region`    -> `US`, `EU`, or `IE` (the eufy server region holding the account)
    - `country`   -> optional real account country such as `AU` or `GB`; leave blank to use `region`
    - `log_level` -> `info` (raise to `debug` only when troubleshooting)
+   - `go2rtc_username` / `go2rtc_password` -> required local credentials shared with the companion
+     integration; use a password of at least 16 characters
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
      captcha (the log prints the `captcha_id`; solve it and set both, then restart).
+   - *(optional)* `verification_code` — if the log reports mailbox verification, enter the six-digit
+     code Eufy emailed and restart. The first challenged start requests the code automatically.
 
    On start the add-on logs into the eufy passport, derives your NVR's `station_sn` from the station
    list, and writes an in-container `auth.json` (chmod 600). Your password is passed only via the
-   environment, scrubbed right after login, and never printed to the log.
+   environment, scrubbed right after login, and never printed to the log. Cached auth is accepted only
+   when it is bound to the same account, server region, and country.
 4. **Start** the add-on and watch the **Log** tab. It logs in, discovers your cameras, generates the
    stream list, and starts go2rtc. Click **Open Web UI** (Eufy go2rtc on port 1985) to see/test the streams.
 
@@ -48,7 +53,7 @@ cloud; the video itself is pulled LAN-direct from the NVR.
 
 On the HA host the add-on serves:
 
-- RTSP: `rtsp://<HA-LAN-IP>:8556/eufy_<camera>`
+- RTSP: `rtsp://<username>:<password>@<HA-LAN-IP>:8556/eufy_<camera>`
 - go2rtc UI / API: `http://<ha-ip>:1985/`
 
 Stream names are derived from your camera names and persisted after first assignment. That means a
@@ -79,7 +84,7 @@ HA), so these ports are opened directly on the host.
 
 - **Supervisor watchdog** polls `tcp://[HOST]:1985`; if go2rtc's API stops answering, the container
   is restarted automatically.
-- **Persistent recovery state** keeps the last successful auth session, discovery result, generated
+- **Persistent recovery state** keeps the last successful account-bound auth session, discovery result, generated
   go2rtc configuration, and stable stream-name registry in `/data`, so transient failures or camera
   renames do not destroy working state.
 - **Automatic boot** brings the bridge back after a Home Assistant host restart.
@@ -95,6 +100,10 @@ HA), so these ports are opened directly on the host.
 ## Troubleshooting
 
 - **"Set email and password"** — fill in the Configuration tab (step 3).
+- **"Set go2rtc username/password"** — configure a local password of at least 16 characters, then use
+  the same values when setting up or reconfiguring the companion integration.
+- **"Email verification required"** — check the mailbox for the six-digit code, put it in
+  `verification_code`, and restart. Remove the code after the login succeeds.
 - **`ERROR STATUS=-104` / discovery connects but never returns `dev_list`** — use the eufy account
   that owns/administers the NVR, not a shared/member account.
 - **"Headless login failed"** — check email / password / region. If the log shows a **CAPTCHA**, set

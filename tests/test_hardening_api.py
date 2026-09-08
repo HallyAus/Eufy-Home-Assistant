@@ -53,6 +53,16 @@ def client(response):
     )
 
 
+class CapturingSession:
+    def __init__(self, response):
+        self.response = response
+        self.request = None
+
+    def get(self, *args, **kwargs):
+        self.request = (args, kwargs)
+        return self.response
+
+
 @pytest.mark.asyncio
 async def test_client_filters_streams_counts_all_and_keeps_summary_private():
     instance = client(Response({"eufy_garage": {"producers": [{"url": "PRIVATE"}], "consumers": [{}]}, "other": {}}))
@@ -60,6 +70,21 @@ async def test_client_filters_streams_counts_all_and_keeps_summary_private():
     assert set(streams) == {"eufy_garage"}
     assert instance.total_stream_count == 2
     assert "PRIVATE" not in repr(api.summarize_streams(streams))
+
+
+@pytest.mark.asyncio
+async def test_client_sends_basic_auth_without_putting_credentials_in_url():
+    session = CapturingSession(Response({"eufy_garage": {}}))
+    instance = api.Go2RtcClient(
+        session, "bridge.local", 1985, 10, "eufy", "0123456789abcdef"
+    )
+
+    await instance.async_get_streams()
+
+    args, kwargs = session.request
+    assert args == ("http://bridge.local:1985/api/streams",)
+    assert kwargs["headers"]["Authorization"].startswith("Basic ")
+    assert "0123456789abcdef" not in args[0]
 
 
 @pytest.mark.asyncio

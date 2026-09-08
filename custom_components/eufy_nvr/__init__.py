@@ -12,8 +12,11 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
+from .const import CONF_PASSWORD, CONF_USERNAME
 from .coordinator import EufyNvrCoordinator
+from .go2rtc_api import validate_credentials
 
 PLATFORMS: list[Platform] = [Platform.CAMERA]
 
@@ -23,6 +26,18 @@ type EufyNvrConfigEntry = ConfigEntry[EufyNvrCoordinator]
 
 async def async_setup_entry(hass: HomeAssistant, entry: EufyNvrConfigEntry) -> bool:
     """Set up Eufy NVR from a config entry."""
+    try:
+        validate_credentials(
+            entry.data.get(CONF_USERNAME, ""), entry.data.get(CONF_PASSWORD, "")
+        )
+    except ValueError as err:
+        # Entries created before local go2rtc authentication was introduced do
+        # not contain credentials. Start HA's guided reauthentication flow.
+        raise ConfigEntryAuthFailed(
+            "Local go2rtc credentials are required; enter the credentials "
+            "configured in the Eufy NVR add-on or bridge"
+        ) from err
+
     coordinator = EufyNvrCoordinator(hass, entry)
 
     # Fail setup (with a retry) if go2rtc is not reachable yet — the add-on may

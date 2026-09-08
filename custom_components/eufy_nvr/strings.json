@@ -29,6 +29,18 @@
           "username": "Local go2rtc username",
           "password": "Local go2rtc password"
         }
+      },
+      "reauth_confirm": {
+        "title": "Authenticate Eufy NVR",
+        "description": "Enter the local go2rtc credentials configured in the Eufy NVR add-on or bridge. Existing entries need these credentials after upgrading to v0.7.2.",
+        "data": {
+          "username": "Local go2rtc username",
+          "password": "Local go2rtc password"
+        },
+        "data_description": {
+          "username": "Must match go2rtc_username in the Eufy NVR add-on.",
+          "password": "Must match go2rtc_password in the Eufy NVR add-on (minimum 16 characters)."
+        }
       }
     },
     "error": {
@@ -39,7 +51,8 @@
     },
     "abort": {
       "already_configured": "This go2rtc endpoint is already configured.",
-      "reconfigure_successful": "Eufy NVR was reconfigured successfully."
+      "reconfigure_successful": "Eufy NVR was reconfigured successfully.",
+      "reauth_successful": "Eufy NVR credentials were updated successfully."
     }
   },
   "entity": {

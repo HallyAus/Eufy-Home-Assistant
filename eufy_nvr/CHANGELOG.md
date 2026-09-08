@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.2
+
+- Implement the current official web mailbox/device-verification flow for `fa_info.step=26052`: request
+  the email code through the push service and repeat the encrypted passport login with the provisional
+  token and six-digit `verification_code` (GitHub issue #13).
+- Bind every auth cache to a non-plaintext account/region/country fingerprint. A failed login now refuses
+  legacy, malformed, or different-account caches instead of feeding a previous user's token to the NVR.
+- Require local go2rtc credentials and apply them to both the management API/UI and RTSP server. The HACS
+  integration supplies Basic auth, emits credentialed RTSP URLs internally, and omits the secret from logs,
+  state attributes, configuration URLs, and diagnostics.
+- Reap the complete engine process group on cancellation or leader exit, add a post-SDP connection timeout,
+  trust the oracle's decoded `-104` marker instead of a byte-length heuristic, and fail producers when
+  ffmpeg exits or its pipe breaks.
+- Pin Python runtime dependencies, CI tools, GitHub Actions, the Home Assistant base images, the bridge
+  source commit, and go2rtc version. Verify
+  SHA-256 for go2rtc and all downloaded Eufy worker assets; remove the mutable unverified FFmpeg download.
+- Run CI against the real runtime dependency set on Python 3.12, 3.13, and 3.14, including import smoke tests.
+
 ## 0.7.1
 
 - Add `eufy_run.py`, a process supervisor around the reversed WebRTC engine. It opens fresh signaling

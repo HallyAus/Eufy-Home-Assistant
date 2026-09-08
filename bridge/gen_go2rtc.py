@@ -249,9 +249,13 @@ def main(argv: list[str] | None = None) -> int:
     online = [(name, camera) for name, camera in named if camera.get("status") != 0]
     print(f"wrote {output_path} ({len(online)} online cameras)")
     print("\n# --- Home Assistant upstream streams ---")
+    print("# Credentials are intentionally omitted; URL-encode them before replacing the placeholders.")
     print("streams:" if online else "streams: {}")
     for name, _ in online:
-        print(f"  {name}:\n  - rtsp://{bridge_host}:{rtsp_port}/{name}")
+        print(
+            f"  {name}:\n"
+            f"  - rtsp://<username>:<password>@{bridge_host}:{rtsp_port}/{name}"
+        )
     return 0
 
 

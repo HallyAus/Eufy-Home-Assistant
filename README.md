@@ -40,8 +40,8 @@ No eufy cloud relay for the video. No Frigate. No flashing the cameras. Just Hom
 
 ## TL;DR — two ways to run it
 
-**The easy way (Home Assistant OS):** install the **add-on**, type your eufy **email + password**, done. The
-add-on runs the whole engine on your HA host and serves the cameras as RTSP/WebRTC. Add the companion
+**The easy way (Home Assistant OS):** install the **add-on**, enter your eufy account and a separate local
+go2rtc password. The add-on runs the whole engine on your HA host and serves the cameras as RTSP/WebRTC. Add the companion
 **integration** and the camera entities appear automatically.
 
 **The manual way (any HA, or a separate PC):** run the **bridge** yourself on a LAN machine with Python + Node
@@ -124,15 +124,24 @@ Runs everything on your HA host; no always-on PC and no token paste.
    - `email` / `password` — your eufy login
    - `region` — `US`, `EU`, or `IE` (the eufy server region that holds your account)
    - `log_level` — `info` (raise to `debug` only when troubleshooting)
+   - `go2rtc_username` / `go2rtc_password` — local credentials (password: at least 16 characters) that
+     protect the camera API, web UI, and RTSP streams; enter the same values in the companion integration
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
+   - *(optional)* `verification_code` — when the log says mailbox verification is required, enter the
+     six-digit code Eufy emailed and restart; the first challenged start requests the code automatically
 4. **Start** the add-on and watch the **Log** tab. It logs in, discovers your cameras, generates the stream list,
    and starts go2rtc. Click **Open Web UI** (the Eufy go2rtc on port `1985`) to test the streams.
 
-Your password is passed only via the environment, scrubbed right after login, and never printed to the log.
+Your eufy password and verification code are passed only via the environment, scrubbed after login, and
+never printed to the log. Cached auth is cryptographically bound to the configured account/region/country,
+so a failed login cannot silently reuse another account's token.
 
 Then add the **companion integration** (below) to get camera entities — for the add-on use your **HA host's
 LAN IP**, not `127.0.0.1`.
+
+Upgrading from an older release: set the new local credentials in the add-on first. Home Assistant will then
+open a reauthentication prompt for the existing companion-integration entry; enter those same credentials.
 
 ---
 
@@ -143,7 +152,8 @@ For a non-HAOS Home Assistant, or to run the engine on a different always-on mac
 **Requirements (bridge host, Windows or Linux, same LAN as the NVR):**
 - **Python 3.11+** with `aiortc av websockets aiohttp pycryptodome cryptography` (`bridge/requirements.txt`)
 - **Node 18+** (runs the libsctp WASM oracle)
-- **ffmpeg** + **go2rtc** (`bridge/fetch_deps.js` downloads both, plus eufy's WASM)
+- **ffmpeg** installed from a trusted package source; `bridge/fetch_deps.js` downloads checksum-verified
+  go2rtc and eufy WASM assets
 - A **eufy account** that owns the NVR
 
 ```bash
@@ -151,7 +161,7 @@ git clone https://github.com/HallyAus/Eufy-Home-Assistant
 cd Eufy-Home-Assistant/bridge
 
 pip install -r requirements.txt        # Python deps
-node fetch_deps.js                     # downloads ffmpeg, go2rtc, eufy's libsctp WASM
+node fetch_deps.js                     # downloads verified go2rtc + eufy libsctp WASM
 
 # Auth — pick ONE:
 #  (a) headless email/password login -> writes auth.json (gitignored):
@@ -161,13 +171,13 @@ node get_auth.js                       # log into the eufy web portal -> auth.js
 
 # Auto-discover the NVR IP + cameras, then generate friendly stream names:
 python eufy_stream.py --discover       # writes cameras.json
-python gen_go2rtc.py <BRIDGE_IP>       # writes go2rtc.yaml (eufy_garage, eufy_front_gate, ...)
+GO2RTC_USERNAME="eufy" GO2RTC_PASSWORD="a-long-local-password" python gen_go2rtc.py <BRIDGE_IP>
 ```
 
 Start it (`start_bridge.cmd` on Windows, `./start_bridge.sh` on Linux) and verify with any RTSP player:
 
 ```bash
-ffplay rtsp://127.0.0.1:8554/eufy_garage
+ffplay rtsp://eufy:a-long-local-password@127.0.0.1:8554/eufy_garage
 ```
 
 ---
@@ -196,6 +206,8 @@ The integration polls the engine's go2rtc and creates a camera entity for every 
      For the **bridge** (Option B) use the **bridge machine's IP** (e.g. `192.168.1.7`).
    - **Add-on:** API port `1985` &nbsp;•&nbsp; RTSP port `8556`
    - **Manual bridge defaults:** API port `1984` &nbsp;•&nbsp; RTSP port `8554`
+   - **Local username/password:** the same `GO2RTC_USERNAME` / `GO2RTC_PASSWORD` configured in the add-on
+     or used when generating the manual bridge configuration
 
    It auto-creates a `camera.eufy_nvr_*` entity per discovered stream, grouped under one "Eufy NVR" device.
 
@@ -204,8 +216,9 @@ The integration polls the engine's go2rtc and creates a camera entity for every 
 ### Or the Generic Camera integration (no HACS)
 
 **Settings → Devices & Services → Add Integration → Generic Camera** → Stream Source
-`rtsp://<host>:<port>/eufy_garage` (one per camera; use port `8556` for the add-on or `8554` for the
-manual bridge; `<host>` is your **HA host's LAN IP** for the add-on, or the bridge IP).
+`rtsp://<username>:<password>@<host>:<port>/eufy_garage` (one per camera; URL-encode special characters in
+the credentials; use port `8556` for the add-on or `8554` for the manual bridge; `<host>` is your **HA host's
+LAN IP** for the add-on, or the bridge IP).
 Or paste the streams into HA's own `/config/go2rtc.yaml` and reference them from a `camera:` / WebRTC card.
 
 ---
@@ -226,11 +239,9 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.6.6:** uses eufy's current SCTP framing runtime and rejects broken add-on images during the build.
-It retains the dedicated add-on ports (`1985` API, `8556` RTSP, `8557` WebRTC) so Home Assistant's
-built-in go2rtc cannot be mistaken for the Eufy service, and falls back to Home Assistant's configured
-LAN host when `homeassistant.local` does not resolve inside the Core container. Known-format ffmpeg
-input skips redundant probing so cold camera images fit Home Assistant's 10-second request window.
+**v0.7.2:** implements Eufy's mailbox/device-verification login used by owner accounts, binds cached auth
+to the exact account, protects go2rtc's LAN API and RTSP video with required credentials, hardens child
+process cleanup and connection timeouts, verifies downloaded runtime assets, and pins release inputs.
 
 **v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,
@@ -255,7 +266,8 @@ and reproducible version-pinned add-on builds. It also includes region-aware sig
 - A passport login bumps the signed-in app session, so avoid logging into the eufy mobile app at the same moment
   the add-on/bridge is logging in or discovering.
 - The login/signaling uses eufy's cloud; the **video itself is LAN-local**.
-- Your eufy credentials and session tokens are **gitignored** — never commit them.
+- Your eufy credentials, local go2rtc password, and session tokens are **gitignored/private state** — never
+  commit or paste them into issue logs.
 
 ## Credits
 

@@ -4,8 +4,8 @@
 # those wheels do not install and PyAV must compile against musl FFmpeg, which is fragile.
 # Debian gives us glibc + prebuilt wheels for aarch64/amd64, so the install is reliable.
 build_from:
-  aarch64: ghcr.io/home-assistant/aarch64-base-debian:bookworm
-  amd64: ghcr.io/home-assistant/amd64-base-debian:bookworm
+  aarch64: ghcr.io/home-assistant/aarch64-base-debian:bookworm@sha256:54c4b13cb3eb10677484ba677c65f352ec52751ae80df60ef9d87f03458bfdb3
+  amd64: ghcr.io/home-assistant/amd64-base-debian:bookworm@sha256:c6a84eec9596b091494a7ba22836090ad56a98a4f73c7b9a9e7590273fc5c5ce
 args:
   GO2RTC_VERSION: "v1.9.14"
 labels:
