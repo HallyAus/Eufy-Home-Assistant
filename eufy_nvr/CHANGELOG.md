@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.15
+
+- Default T8N00 signaling to native `call` and parse/send full SDP offers and answers. Live probes against
+  an online NVR with four online cameras showed compact `scall` remaining at status 100 before status 408,
+  while native `call` reached status 200 in 1.9 seconds and delivered its SDP offer in 2.6 seconds.
+- Keep explicit `scall` support for diagnostics and correct the WebSocket subprotocol region so it follows
+  the selected smart-service region rather than the account country.
+
 ## 0.7.14
 
 - Update the reversed NVR signaling envelope to match Eufy's current official web client. Action messages now

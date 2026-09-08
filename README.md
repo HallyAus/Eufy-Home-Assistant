@@ -244,7 +244,7 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.7.14:** eliminates concurrent-session startup storms with an Eufy-specific one-session gate and adaptive
+**v0.7.15:** eliminates concurrent-session startup storms with an Eufy-specific one-session gate and adaptive
 last-viewed-camera lease. Home Assistant snapshots use go2rtc's coalesced JPEG endpoint directly; a sequential
 primer seeds every camera before its entities are exposed, then stale-while-revalidate makes multi-camera dashboards return immediately while
 cold producers refresh in the background. go2rtc now signals the Eufy supervisor gracefully and allows it to wait
