@@ -5,7 +5,7 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** v0.7.13 serializes the NVR's single live session, retains only the
+> **Status: experimental.** v0.7.14 serializes the NVR's single live session, retains only the
 > last-viewed live camera with an adaptive lease, and serves pre-seeded Home Assistant thumbnails stale-while-revalidate.
 > It also includes Eufy mailbox/device verification, account-bound auth caches, authenticated LAN access,
 > strict process supervision, and verified immutable build inputs. The

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.14
+
+- Update the reversed NVR signaling envelope to match Eufy's current official web client. Action messages now
+  use `MD5(channel + admin_user_id + timestamp)` as the account proof, carry the actual camera channel, prefix
+  request IDs with the authenticated session token, and acknowledge scall status 200 immediately. The old random
+  proof/channel-0 envelope was accepted by the signaling WebSocket but could leave the NVR indefinitely at TURN
+  status 100 without an SDP offer.
+
 ## 0.7.13
 
 - Align Home Assistant's initial snapshot request with the complete supervised Eufy retry window. The primer no
