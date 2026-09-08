@@ -57,7 +57,7 @@ def test_rename_and_channel_move_preserve_identity(tmp_path):
     assert first[0][0] == second[0][0] == "eufy_garage"
     config = paths[1].read_text()
     assert "eufy_run.py 4 --rtsp" in config
-    assert "#starttimeout=60#killtimeout=8" in config
+    assert "#starttimeout=60#killtimeout=1" in config
 
 
 def test_removed_camera_name_cannot_be_hijacked(tmp_path):

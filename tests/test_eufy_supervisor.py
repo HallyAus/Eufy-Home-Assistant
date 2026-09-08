@@ -102,3 +102,4 @@ def test_supervisor_limits_are_bounded():
     assert 10 <= supervisor.CONNECTION_TIMEOUT <= 180
     assert 10 <= supervisor.STALL_TIMEOUT <= 180
     assert 0 < supervisor.SESSION_LOCK_POLL <= 1
+    assert 0 <= supervisor.SESSION_RELEASE_DELAY <= 5

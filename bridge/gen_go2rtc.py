@@ -154,7 +154,7 @@ def render_config(
     for name, camera in online:
         command = (
             f"exec:python eufy_run.py {camera['channel']} --rtsp {{output}}"
-            f"#starttimeout={STREAM_START_TIMEOUT}#killtimeout=8"
+            f"#starttimeout={STREAM_START_TIMEOUT}#killtimeout=1"
         )
         lines.append(f"  {name}: {json.dumps(command)}")
     lines.extend([

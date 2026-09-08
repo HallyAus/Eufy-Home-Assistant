@@ -77,6 +77,7 @@ class AdaptiveWarmer:
         self.warmer: asyncio.Task[None] | None = None
         self.last_external_at = 0.0
         self.last_start_attempt = 0.0
+        self.last_api_error_log = 0.0
 
     def request_stop(self) -> None:
         self.stop_event.set()
@@ -131,11 +132,16 @@ class AdaptiveWarmer:
 
     async def run(self) -> None:
         timeout = aiohttp.ClientTimeout(total=API_TIMEOUT)
+        log("controller started")
         async with aiohttp.ClientSession(timeout=timeout) as session:
             while not self.stop_event.is_set():
                 try:
                     streams = await self.fetch_streams(session)
-                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError):
+                except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:
+                    now = time.monotonic()
+                    if now - self.last_api_error_log >= 30.0:
+                        log(f"local API unavailable ({type(error).__name__}); retrying")
+                        self.last_api_error_log = now
                     await self.stop_warmer()
                     await self.wait(POLL_INTERVAL)
                     continue

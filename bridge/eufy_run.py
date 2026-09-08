@@ -35,6 +35,9 @@ SESSION_LOCK_PATH = Path(
     )
 )
 SESSION_LOCK_POLL = 0.10
+SESSION_RELEASE_DELAY = max(
+    0.0, min(float(os.environ.get("EUFY_SESSION_RELEASE_DELAY", "1.0")), 5.0)
+)
 
 
 @dataclass
@@ -276,6 +279,17 @@ async def main(argv: list[str] | None = None) -> int:
         try:
             rc, reason, state = await run_attempt(args, discovery, stop_event)
         finally:
+            # go2rtc has already removed the last consumer when the engine exits,
+            # but the appliance needs a brief beat to retire its WebRTC session.
+            # Holding the lock during that beat prevents the next camera from
+            # racing the NVR's internal teardown and receiving status 486.
+            if not stop_event.is_set() and SESSION_RELEASE_DELAY:
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(), timeout=SESSION_RELEASE_DELAY
+                    )
+                except asyncio.TimeoutError:
+                    pass
             gate.release()
 
         if reason == "shutdown":

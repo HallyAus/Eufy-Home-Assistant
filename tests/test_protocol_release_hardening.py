@@ -24,7 +24,7 @@ def test_addon_classifies_authorization_and_supervised_signaling_failures():
 def test_go2rtc_generation_is_restricted_and_tolerates_cold_start():
     source = (ROOT / "bridge/gen_go2rtc.py").read_text()
     assert "starttimeout=" in source
-    assert "killtimeout=" in source
+    assert "killtimeout=1" in source
     assert "modules: [api, rtsp, webrtc, exec, mjpeg, mpegts]" in source
     assert "allow_paths: [python]" in source
     assert "/api/streams" in source
