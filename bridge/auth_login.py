@@ -26,6 +26,8 @@ import re
 import sys
 import tempfile
 
+import aiohttp
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import eufy_cloud as ec  # noqa: E402
 
@@ -58,6 +60,46 @@ def cache_matches(path: str, email: str, region: str, country: str) -> bool:
         and hmac.compare_digest(
             actual, account_fingerprint(email, region, country))
     )
+
+
+def sign_response_is_live(status: int, body) -> bool:
+    """Return whether a ws/sign response proves the cached session is usable."""
+    return bool(
+        status == 200
+        and isinstance(body, dict)
+        and body.get("code") == 0
+        and isinstance(body.get("data"), str)
+        and body["data"]
+    )
+
+
+async def cache_is_live(path: str, email: str, region: str, country: str) -> bool:
+    """Validate an account-bound cache without creating a new login session."""
+    if not cache_matches(path, email, region, country):
+        return False
+    try:
+        with open(path, encoding="utf-8") as handle:
+            cached = json.load(handle)
+        _ws_url, sign_url = ec.smart_urls(cached["stationSn"], region)
+        headers = {
+            "x-auth-token": cached["authToken"],
+            "gtoken": cached.get("gtoken", ""),
+            "app-name": cached.get("appName", "eufy_mega"),
+            "model-type": "WEB",
+            "web-country": country,
+            "origin": "https://security.eufy.com",
+            "referer": "https://security.eufy.com/",
+        }
+        timeout = aiohttp.ClientTimeout(total=15)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(sign_url, headers=headers) as response:
+                try:
+                    body = await response.json(content_type=None)
+                except (aiohttp.ContentTypeError, json.JSONDecodeError):
+                    return False
+                return sign_response_is_live(response.status, body)
+    except (OSError, ValueError, TypeError, KeyError, aiohttp.ClientError, asyncio.TimeoutError):
+        return False
 
 
 def _find_station_sn(raw) -> str:
@@ -100,6 +142,14 @@ async def main() -> int:
         if not email:
             return 1
         return 0 if cache_matches(sys.argv[2], email, region, country) else 1
+
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-cache-live":
+        if not email:
+            return 1
+        live = await cache_is_live(sys.argv[2], email, region, country)
+        if live:
+            print("auth_login: cached auth session is live; login not required")
+        return 0 if live else 1
 
     password = os.environ.get("EUFY_PASSWORD", "")
     if not email or not password:

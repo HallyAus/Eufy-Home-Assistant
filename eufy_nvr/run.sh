@@ -48,19 +48,16 @@ if bashio::config.has_value 'captcha_answer'; then export EUFY_CAPTCHA_ANSWER="$
 if bashio::config.has_value 'verification_code'; then export EUFY_VERIFICATION_CODE="$(bashio::config 'verification_code')"; fi
 
 umask 077
-if ! python3 auth_login.py; then
-    if python3 auth_login.py --check-cache "${EUFY_AUTH}"; then
-        bashio::log.warning "Fresh login failed; using the cache bound to this exact account/region/country."
-        bashio::log.warning "Verify region/country, CAPTCHA, or mailbox verification settings before the cached session expires."
-    else
-        bashio::log.fatal "Headless login failed and no matching account-bound cache exists. Refusing to reuse unknown or different-account credentials."
-        bashio::log.fatal "For mailbox verification, enter the emailed six-digit verification_code and restart."
-        bashio::log.fatal "For a graphic CAPTCHA, set captcha_id + captcha_answer and restart."
-        unset EUFY_PASSWORD
-        unset EUFY_VERIFICATION_CODE
-        sleep 15
-        exit 1
-    fi
+if python3 auth_login.py --check-cache-live "${EUFY_AUTH}"; then
+    bashio::log.info "Reusing the live account-bound auth session; skipped a redundant passport login."
+elif ! python3 auth_login.py; then
+    bashio::log.fatal "Headless login failed and no live account-bound cache exists. Refusing to start producers with rejected credentials."
+    bashio::log.fatal "For mailbox verification, enter the emailed six-digit verification_code and restart."
+    bashio::log.fatal "For a graphic CAPTCHA, set captcha_id + captcha_answer and restart."
+    unset EUFY_PASSWORD
+    unset EUFY_VERIFICATION_CODE
+    sleep 15
+    exit 1
 else
     bashio::log.info "Logged in; refreshed auth.json (region $(bashio::config 'region' 'US'))."
 fi
@@ -102,7 +99,7 @@ discover_and_generate() {
         fi
 
         if grep -q 'signaling timed out' "${log_file}"; then
-            bashio::log.warning "Eufy signaling did not progress from scall/TURN to an SDP offer; fresh signaling sessions were attempted automatically."
+            bashio::log.warning "Eufy signaling did not progress from call/TURN to an SDP offer; fresh signaling sessions were attempted automatically."
         fi
 
         if [ "${rc}" -eq 0 ] && [ -s "${EUFY_CAMERAS}" ]; then
@@ -136,7 +133,7 @@ if ! discover_and_generate; then
         bashio::log.warning "Discovery failed but a previous go2rtc.yaml exists — starting with it."
     else
         bashio::log.fatal "Could not discover cameras and no cached go2rtc.yaml is present. Aborting."
-        bashio::log.fatal "Check the signaling messages above. Common causes are region mismatch, expired auth, a busy NVR session, or a stalled scall/TURN negotiation."
+        bashio::log.fatal "Check the signaling messages above. Common causes are region mismatch, expired auth, a busy NVR session, or a stalled call/TURN negotiation."
         sleep 15
         exit 1
     fi
@@ -182,12 +179,13 @@ start_relogin_timer() {
     fi
     ( while true; do
         sleep "$(( hours * 3600 ))"
-        bashio::log.info "Refreshing eufy auth token (periodic, every ${hours}h)..."
-        if EUFY_PASSWORD="$(bashio::config 'password')" python3 auth_login.py >/dev/null 2>&1; then
+        if python3 auth_login.py --check-cache-live "${EUFY_AUTH}" >/dev/null 2>&1; then
+            bashio::log.info "Periodic auth check: cached session is still live; skipped login."
+        elif EUFY_PASSWORD="$(bashio::config 'password')" python3 auth_login.py >/dev/null 2>&1; then
             chmod 600 "${EUFY_AUTH}" 2>/dev/null || true
-            bashio::log.info "auth.json refreshed."
+            bashio::log.info "Expired auth session renewed."
         else
-            bashio::log.warning "Periodic token refresh failed; will retry next cycle."
+            bashio::log.warning "Expired auth session could not be renewed; will retry next cycle."
         fi
       done ) &
     RELOGIN_PID=$!

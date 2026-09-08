@@ -131,3 +131,19 @@ def test_legacy_or_incomplete_cache_is_never_used_as_fallback(tmp_path: Path):
     assert not auth_login.cache_matches(
         str(cache), "owner@example.com", "us-pr", "US"
     )
+
+
+def test_ws_sign_response_must_prove_cached_session_is_live():
+    assert auth_login.sign_response_is_live(200, {"code": 0, "data": "sign"})
+    assert not auth_login.sign_response_is_live(401, {"code": 26084})
+    assert not auth_login.sign_response_is_live(200, {"code": 0, "data": ""})
+    assert not auth_login.sign_response_is_live(200, {"code": 1, "data": "sign"})
+
+
+def test_addon_validates_cache_before_login_or_starting_producers():
+    run_script = (ROOT / "eufy_nvr/run.sh").read_text()
+
+    assert 'auth_login.py --check-cache-live "${EUFY_AUTH}"' in run_script
+    assert "skipped a redundant passport login" in run_script
+    assert "no live account-bound cache exists" in run_script
+    assert "using the cache bound" not in run_script

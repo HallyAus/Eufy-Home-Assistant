@@ -95,8 +95,9 @@ HA), so these ports are opened directly on the host.
   go2rtc configuration, and stable stream-name registry in `/data`, so transient failures or camera
   renames do not destroy working state.
 - **Automatic boot** brings the bridge back after a Home Assistant host restart.
-- **Periodic authentication refresh** runs independently of camera demand, preventing an
-  expired cloud signaling session from leaving healthy local go2rtc ports with unusable producers.
+- **Periodic authentication validation** checks `ws/sign` without creating a new passport session and
+  logs in only after the cached token is rejected. Restarts reuse a live account-bound token, avoiding
+  Eufy's daily login cap and preventing invalid credentials from starting producer retry storms.
 - **In-process supervise loop** in `run.sh` restarts go2rtc on a plain crash with exponential backoff
   (2s -> 60s cap), recovering faster than a full container bounce and without hammering the NVR.
 - Generated camera and go2rtc state is validated before replacement and written atomically.

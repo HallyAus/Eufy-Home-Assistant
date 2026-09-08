@@ -62,7 +62,7 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn('STATE_DIR="/data"', run_script)
         self.assertIn('CONFIG_PATH="${STATE_DIR}/go2rtc.yaml"', run_script)
         self.assertIn('EUFY_AUTH="${STATE_DIR}/auth.json"', run_script)
-        self.assertIn('auth_login.py --check-cache "${EUFY_AUTH}"', run_script)
+        self.assertIn('auth_login.py --check-cache-live "${EUFY_AUTH}"', run_script)
         self.assertNotIn('if [ -s "${EUFY_AUTH}" ]; then', run_script)
         self.assertNotIn('rm -f "${EUFY_AUTH}"', run_script)
         self.assertIn('EUFY_CAMERAS="${STATE_DIR}/cameras.json"', run_script)
