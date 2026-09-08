@@ -29,7 +29,6 @@ from .const import (
 )
 from .coordinator import EufyNvrCoordinator
 from .go2rtc_api import STREAM_PREFIX, api_base_url, rtsp_url, stream_summary
-from .snapshot import SnapshotCache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,7 +95,6 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
         Camera.__init__(self)
 
         self._stream = stream
-        self._snapshot_cache = SnapshotCache(ttl=30.0, stale_ttl=300.0)
         self._stream_source = rtsp_url(
             host, rtsp_port, stream, username, password
         )
@@ -128,16 +126,11 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
     ) -> bytes | None:
         """Coalesce dashboard thumbnails without repeatedly spawning FFmpeg."""
         if not self.available:
-            self._snapshot_cache.clear()
             return None
 
-        async def capture() -> bytes | None:
-            return await self.coordinator.async_get_frame(self._stream)
-
         try:
-            image = await self._snapshot_cache.async_get("frame", capture)
+            image = await self.coordinator.async_get_frame(self._stream)
             if not self.available:
-                self._snapshot_cache.clear()
                 return None
             return image
         except Exception as error:
@@ -148,7 +141,7 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
 
     async def async_will_remove_from_hass(self) -> None:
         """Drop in-memory images when the integration unloads."""
-        self._snapshot_cache.clear()
+        self.coordinator.discard_frame(self._stream)
         await super().async_will_remove_from_hass()
 
     @property

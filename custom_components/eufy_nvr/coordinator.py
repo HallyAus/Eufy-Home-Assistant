@@ -8,6 +8,7 @@ entity automatically — no YAML, no re-config.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -22,10 +23,14 @@ from .const import (
     CONF_PASSWORD,
     CONF_USERNAME,
     DOMAIN,
+    FRAME_CACHE_TTL,
+    FRAME_PRIME_INTERVAL,
+    FRAME_STALE_TTL,
     REQUEST_TIMEOUT,
     UPDATE_INTERVAL,
 )
 from .go2rtc_api import Go2RtcClient, Go2RtcError
+from .snapshot import SnapshotCache
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +57,10 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
         self.host = self._client.host
         self.api_port = self._client.api_port
+        self._frame_cache = SnapshotCache(
+            ttl=FRAME_CACHE_TTL,
+            stale_ttl=FRAME_STALE_TTL,
+        )
 
         super().__init__(
             hass,
@@ -81,5 +90,35 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         return streams
 
     async def async_get_frame(self, stream: str) -> bytes:
-        """Fetch one snapshot through go2rtc's coalescing JPEG endpoint."""
-        return await self._client.async_get_frame(stream)
+        """Fetch or reuse one coalesced snapshot for a camera."""
+
+        async def capture() -> bytes:
+            return await self._client.async_get_frame(stream)
+
+        frame = await self._frame_cache.async_get(stream, capture)
+        if frame is None:
+            raise Go2RtcError("snapshot endpoint returned no frame")
+        return frame
+
+    def discard_frame(self, stream: str) -> None:
+        """Discard a removed camera's retained image."""
+        self._frame_cache.discard(stream)
+
+    async def async_prime_frames(self) -> int:
+        """Seed cameras sequentially so a dashboard always has a fallback."""
+        primed = 0
+        for stream in sorted(self.data or {}):
+            try:
+                await self.async_get_frame(stream)
+            except (Go2RtcError, TimeoutError):
+                _LOGGER.debug("Could not prime snapshot for %s", stream)
+            else:
+                primed += 1
+        _LOGGER.debug("Primed %d/%d Eufy camera snapshots", primed, len(self.data or {}))
+        return primed
+
+    async def async_prime_frames_forever(self) -> None:
+        """Prime at startup, then refresh infrequently and sequentially."""
+        while True:
+            await self.async_prime_frames()
+            await asyncio.sleep(FRAME_PRIME_INTERVAL)

@@ -35,6 +35,13 @@ UPDATE_INTERVAL = timedelta(seconds=30)
 # Network timeout for the go2rtc REST call.
 REQUEST_TIMEOUT = 10
 
+# Seed one bounded stale thumbnail per camera after setup. Refreshing every
+# 30 minutes keeps the cold-start fallback useful without continuously cycling
+# the NVR's single hardware session.
+FRAME_CACHE_TTL = 30.0
+FRAME_STALE_TTL = 60.0 * 60.0
+FRAME_PRIME_INTERVAL = 30.0 * 60.0
+
 # DeviceInfo identity for the single "Eufy NVR" hub device the cameras hang off.
 MANUFACTURER = "eufy"
 MODEL = "PoE NVR (S4 / T8N00)"

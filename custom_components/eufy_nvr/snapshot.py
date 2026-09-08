@@ -43,6 +43,10 @@ class SnapshotCache:
         """Discard cached images, for example when the camera is unavailable."""
         self._cache.clear()
 
+    def discard(self, key: Hashable) -> None:
+        """Discard one cache entry without affecting the other cameras."""
+        self._cache.pop(key, None)
+
     async def async_get(
         self, key: Hashable, capture: Callable[[], Awaitable[bytes | None]]
     ) -> bytes | None:

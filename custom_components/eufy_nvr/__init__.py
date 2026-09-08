@@ -14,7 +14,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import CONF_PASSWORD, CONF_USERNAME
+from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN
 from .coordinator import EufyNvrCoordinator
 from .go2rtc_api import validate_credentials
 
@@ -47,6 +47,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufyNvrConfigEntry) -> b
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    primer = hass.async_create_task(
+        coordinator.async_prime_frames_forever(),
+        f"{DOMAIN} snapshot primer",
+    )
+    entry.async_on_unload(primer.cancel)
     return True
 
 

@@ -113,6 +113,18 @@ async def test_clear_removes_cached_images():
     assert await cache.async_get(1, capture) == b"fresh"
 
 
+@pytest.mark.asyncio
+async def test_discard_removes_only_one_camera():
+    cache = SnapshotCache()
+    first = AsyncMock(return_value=b"first")
+    second = AsyncMock(return_value=b"second")
+    assert await cache.async_get("front", first) == b"first"
+    assert await cache.async_get("shed", second) == b"second"
+    cache.discard("front")
+    assert "front" not in cache._cache
+    assert "shed" in cache._cache
+
+
 @pytest.mark.parametrize("options", [{"ttl": 0}, {"timeout": 0}, {"max_entries": 0}, {"failure_ttl": -1}, {"ttl": 5, "stale_ttl": 4}])
 def test_invalid_cache_limits(options):
     with pytest.raises(ValueError):
