@@ -1,9 +1,10 @@
-"""Bounded, short-lived snapshot caching without a background worker.
+"""Bounded snapshot caching with coalesced stale-while-revalidate refreshes.
 
 Concurrent requests for a camera share cached results. Each camera serialises
 its captures rather than starting multiple producers at once. Fresh images use
-a short TTL; bounded stale images keep dashboards responsive during a transient
-camera handoff or NVR busy response.
+a short TTL. Once seeded, bounded stale images return immediately while one
+background refresh runs, so a dashboard never queues four thumbnails behind the
+NVR's single hardware live-session limit.
 """
 
 from __future__ import annotations
@@ -38,24 +39,31 @@ class SnapshotCache:
         self._cache: OrderedDict[
             Hashable, tuple[float, float, bytes | None]
         ] = OrderedDict()
+        self._refresh_tasks: dict[Hashable, asyncio.Task[None]] = {}
 
     def clear(self) -> None:
         """Discard cached images, for example when the camera is unavailable."""
         self._cache.clear()
+        for task in self._refresh_tasks.values():
+            task.cancel()
+        self._refresh_tasks.clear()
 
     def discard(self, key: Hashable) -> None:
         """Discard one cache entry without affecting the other cameras."""
         self._cache.pop(key, None)
+        if task := self._refresh_tasks.pop(key, None):
+            task.cancel()
 
     async def async_get(
         self, key: Hashable, capture: Callable[[], Awaitable[bytes | None]]
     ) -> bytes | None:
         """Return a recent image or capture one within the request's deadline.
 
-        The deadline covers waiting for the lock as well as image capture.
-        Cancellation propagates to the capture coroutine; no detached task is
-        created. A failed/empty refresh uses a bounded stale image when one is
-        available and a brief cooldown prevents an immediate retry storm.
+        The deadline covers waiting for the lock as well as the first image
+        capture. Cancellation propagates for an unseeded capture. Once a stale
+        image exists it returns immediately and a single coalesced background
+        refresh updates it; failures retain the stale image with a brief retry
+        cooldown.
         """
         async with asyncio.timeout(self._timeout):
             async with self._lock:
@@ -66,9 +74,13 @@ class SnapshotCache:
                 ]:
                     del self._cache[expired]
                 if key in self._cache:
-                    fresh_until, _, image = self._cache[key]
+                    fresh_until, stale_until, image = self._cache[key]
                     if fresh_until > now:
                         self._cache.move_to_end(key)
+                        return image
+                    if image and stale_until > now:
+                        self._cache.move_to_end(key)
+                        self._start_refresh(key, capture)
                         return image
                 stale = self._cache.get(key)
                 try:
@@ -86,6 +98,65 @@ class SnapshotCache:
                     return stale[2]
                 self._remember(key, image)
                 return image
+
+    def _start_refresh(
+        self, key: Hashable, capture: Callable[[], Awaitable[bytes | None]]
+    ) -> None:
+        """Start at most one non-blocking refresh for a stale camera image."""
+        if key in self._refresh_tasks:
+            return
+        task = asyncio.create_task(self._async_refresh(key, capture))
+        self._refresh_tasks[key] = task
+        task.add_done_callback(
+            lambda done, cache_key=key: self._refresh_done(cache_key, done)
+        )
+
+    def _refresh_done(self, key: Hashable, task: asyncio.Task[None]) -> None:
+        """Forget a completed refresh without removing a newer task for the key."""
+        if self._refresh_tasks.get(key) is task:
+            self._refresh_tasks.pop(key, None)
+        if not task.cancelled():
+            task.exception()
+
+    async def _async_refresh(
+        self, key: Hashable, capture: Callable[[], Awaitable[bytes | None]]
+    ) -> None:
+        """Refresh one stale image serially; errors are represented by cooldown."""
+        try:
+            async with asyncio.timeout(self._timeout):
+                async with self._lock:
+                    now = self._clock()
+                    stale = self._cache.get(key)
+                    if stale is None or stale[1] <= now:
+                        return
+                    if stale[0] > now:
+                        return
+                    try:
+                        image = await capture()
+                    except Exception:
+                        self._cache[key] = (
+                            now + self._failure_ttl, stale[1], stale[2]
+                        )
+                        self._cache.move_to_end(key)
+                        return
+                    if image is None:
+                        self._cache[key] = (
+                            now + self._failure_ttl, stale[1], stale[2]
+                        )
+                        self._cache.move_to_end(key)
+                        return
+                    self._remember(key, image)
+        except TimeoutError:
+            # A foreground call already received the stale image. Leave it in
+            # place and allow another bounded refresh after the cooldown.
+            async with self._lock:
+                now = self._clock()
+                stale = self._cache.get(key)
+                if stale is not None and stale[1] > now:
+                    self._cache[key] = (
+                        now + self._failure_ttl, stale[1], stale[2]
+                    )
+                    self._cache.move_to_end(key)
 
     def _remember(self, key: Hashable, image: bytes | None) -> None:
         ttl = self._ttl if image else self._failure_ttl

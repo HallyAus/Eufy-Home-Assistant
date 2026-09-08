@@ -38,13 +38,40 @@ async def test_different_dimensions_never_capture_in_parallel():
 
 
 @pytest.mark.asyncio
-async def test_expiry_never_serves_stale_image():
+async def test_expiry_returns_stale_while_refreshing():
     now = [0.0]
     capture = AsyncMock(side_effect=[b"first", b"second"])
     cache = SnapshotCache(clock=lambda: now[0])
     assert await cache.async_get(1, capture) == b"first"
     now[0] = 3.0
+    assert await cache.async_get(1, capture) == b"first"
+    await asyncio.gather(*cache._refresh_tasks.values())
     assert await cache.async_get(1, capture) == b"second"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_stale_requests_start_one_background_refresh():
+    now = [0.0]
+    release = asyncio.Event()
+    calls = 0
+
+    async def capture():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            await release.wait()
+        return f"image-{calls}".encode()
+
+    cache = SnapshotCache(clock=lambda: now[0])
+    assert await cache.async_get(1, capture) == b"image-1"
+    now[0] = 4.0
+    results = await asyncio.gather(*(cache.async_get(1, capture) for _ in range(20)))
+    assert results == [b"image-1"] * 20
+    assert calls == 2
+    assert len(cache._refresh_tasks) == 1
+    release.set()
+    await asyncio.gather(*cache._refresh_tasks.values())
+    assert await cache.async_get(1, capture) == b"image-2"
 
 
 @pytest.mark.asyncio
@@ -67,8 +94,11 @@ async def test_exception_returns_bounded_stale_image():
     assert await cache.async_get(1, capture) == b"old"
     now[0] = 4.0
     assert await cache.async_get(1, capture) == b"old"
+    await asyncio.gather(*cache._refresh_tasks.values())
     assert await cache.async_get(1, capture) == b"old"
     now[0] = 5.0
+    assert await cache.async_get(1, capture) == b"old"
+    await asyncio.gather(*cache._refresh_tasks.values())
     assert await cache.async_get(1, capture) == b"new"
 
 

@@ -225,6 +225,7 @@ class Oracle:
         self.proc = None; self.ready = asyncio.Event()
         self.on_tx = None      # callback(bytes) -> send PTCS packet on WebrtcDataChannel
         self.on_frame = None   # callback(link:int, bytes) -> reassembled frame
+        self.on_control_status = None  # callback(status:int) for fixed replies
 
     async def start(self):
         # limit must hold a whole base64'd video frame on one stdout line (1080p keyframes can be >100KB).
@@ -257,6 +258,8 @@ class Oracle:
                     self.on_tx(base64.b64decode(msg["b64"]))
             elif ev == "frame":
                 if self.on_frame: self.on_frame(msg.get("channel"), base64.b64decode(msg["b64"]))
+            elif ev == "control_status":
+                if self.on_control_status: self.on_control_status(msg.get("status"))
             elif ev == "error":
                 log("oracle error:", msg)
 
@@ -296,6 +299,13 @@ async def main():
     state = {"connected": False, "started": False, "vbytes": 0, "vframes": 0, "ptcs_in": 0,
              "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False,
              "fatal_reason": None, "shutting_down": False, "close_sent": False}
+    close_ack = asyncio.Event()
+
+    def on_control_status(status):
+        if state["close_sent"] and status == 0:
+            close_ack.set()
+
+    oracle.on_control_status = on_control_status
     if CAPTURE_DEBUG:
         os.makedirs(os.path.join(ROOT, "_debug"), exist_ok=True)
         dumpf = open(VIDEO_DUMP, "wb")
@@ -473,9 +483,13 @@ async def main():
             close = build_cmd(USER_ID, 1004, {})
             log(f"-> closeLive (1004) len={len(close)}")
             oracle.push_send(1, close)
-            # The oracle frames asynchronously; leave the data channel open
-            # long enough for its tx callback to put the command on the wire.
-            await asyncio.sleep(0.35)
+            # Keep the data channel alive until the NVR acknowledges teardown.
+            # A bounded fallback still lets shutdown finish if the ack is lost.
+            try:
+                await asyncio.wait_for(close_ack.wait(), timeout=1.0)
+                log("<- closeLive acknowledged")
+            except asyncio.TimeoutError:
+                log("closeLive acknowledgement timed out; closing transport")
         except Exception as error:
             log("closeLive send failed:", type(error).__name__)
 

@@ -135,7 +135,7 @@ async def _terminate_tree(proc: asyncio.subprocess.Process) -> None:
         except ProcessLookupError:
             pass
         try:
-            await asyncio.wait_for(proc.wait(), timeout=1.5)
+            await asyncio.wait_for(proc.wait(), timeout=3.0)
         except asyncio.TimeoutError:
             pass
     try:

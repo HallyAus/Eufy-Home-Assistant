@@ -119,11 +119,14 @@ class ReleasePackagingTest(unittest.TestCase):
     def test_snapshot_primer_is_sequential_and_infrequent(self):
         coordinator = (ROOT / "custom_components/eufy_nvr/coordinator.py").read_text()
         constants = (ROOT / "custom_components/eufy_nvr/const.py").read_text()
+        snapshot = (ROOT / "custom_components/eufy_nvr/snapshot.py").read_text()
 
         self.assertIn("for stream in sorted(current - self._primed_streams)", coordinator)
         self.assertNotIn("asyncio.gather", coordinator)
         self.assertIn("FRAME_PRIME_INTERVAL = 30.0 * 60.0", constants)
         self.assertIn("FRAME_STALE_TTL = 60.0 * 60.0", constants)
+        self.assertIn("FRAME_INITIAL_TIMEOUT = 30.0", constants)
+        self.assertIn("self._start_refresh(key, capture)", snapshot)
         self.assertIn("current - self._primed_streams", coordinator)
         self.assertIn("retry_delay = min", coordinator)
 

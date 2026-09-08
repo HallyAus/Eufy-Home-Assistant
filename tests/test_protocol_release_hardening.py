@@ -24,7 +24,7 @@ def test_addon_classifies_authorization_and_supervised_signaling_failures():
 def test_go2rtc_generation_is_restricted_and_tolerates_cold_start():
     source = (ROOT / "bridge/gen_go2rtc.py").read_text()
     assert "starttimeout=" in source
-    assert "killtimeout=1" in source
+    assert "killsignal=2#killtimeout=5" in source
     assert "modules: [api, rtsp, webrtc, exec, mjpeg, mpegts]" in source
     assert "allow_paths: [python]" in source
     assert "/api/streams" in source
@@ -39,9 +39,12 @@ def test_live_sessions_are_closed_before_process_teardown():
 
     assert "build_cmd(USER_ID, 1004, {})" in stream
     assert "-> closeLive (1004)" in stream
+    assert "await asyncio.wait_for(close_ack.wait(), timeout=1.0)" in stream
+    assert "<- closeLive acknowledged" in stream
     assert "await close_live()" in stream
     assert 'if (\n            DISCOVER\n            or state["close_sent"]' not in stream
     assert "os.kill(proc.pid, signal.SIGINT)" in supervisor
+    assert "timeout=3.0" in supervisor
 
 
 def test_release_versions_and_go2rtc_are_aligned():

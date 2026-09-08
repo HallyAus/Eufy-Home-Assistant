@@ -40,6 +40,10 @@ REQUEST_TIMEOUT = 10
 # the NVR's single hardware session.
 FRAME_CACHE_TTL = 30.0
 FRAME_STALE_TTL = 60.0 * 60.0
+# A first-ever four-camera dashboard load must wait for the NVR's single camera
+# session to rotate sequentially. This applies only until each camera is seeded;
+# later requests use stale-while-revalidate and return immediately.
+FRAME_INITIAL_TIMEOUT = 30.0
 FRAME_PRIME_INTERVAL = 30.0 * 60.0
 FRAME_PRIME_RETRY_INITIAL = 10.0
 FRAME_PRIME_RETRY_MAX = 5.0 * 60.0
