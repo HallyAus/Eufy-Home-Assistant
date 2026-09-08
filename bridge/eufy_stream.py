@@ -84,9 +84,9 @@ HEADERS = {
     "accept": "application/json, text/plain, */*", "user-agent": UA,
     "origin": "https://security.eufy.com", "referer": "https://security.eufy.com/",
 }
-os.makedirs(os.path.join(ROOT, "_debug"), exist_ok=True)
 VIDEO_DUMP = os.path.join(ROOT, "_debug", "video_dump.bin")
 FRAMES_LOG = os.path.join(ROOT, "_debug", "frames.jsonl")
+CAPTURE_DEBUG = os.environ.get("EUFY_CAPTURE_DEBUG") == "1"
 # Discovery manifest. Like EUFY_AUTH, the add-on points this at /data so the
 # discovered camera list survives a container restart/rebuild and gen_go2rtc.py
 # reads it from the exact same place; default to the bridge dir for standalone runs.
@@ -278,10 +278,13 @@ class Oracle:
 
 
 async def main():
-    sign_token = await get_sign_token()
+    perf_started = time.monotonic()
+    oracle = Oracle()
+    sign_task = asyncio.create_task(get_sign_token())
+    await oracle.start()
+    sign_token = await sign_task
     log("sign token acquired; channels", CHANNELS)
-
-    oracle = Oracle(); await oracle.start()
+    log(f"PERF bootstrap_ms={int((time.monotonic() - perf_started) * 1000)}")
 
     sub = {"region": AUTH.get("webCountry", "US"), "type": "NVR", "sn": STATION_SN,
            "token": AUTH["authToken"], "gtoken": AUTH["gtoken"], "sign": sign_token,
@@ -293,7 +296,13 @@ async def main():
     state = {"connected": False, "started": False, "vbytes": 0, "vframes": 0, "ptcs_in": 0,
              "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False,
              "fatal_reason": None, "shutting_down": False}
-    dumpf = open(VIDEO_DUMP, "wb"); framelog = open(FRAMES_LOG, "w")
+    if CAPTURE_DEBUG:
+        os.makedirs(os.path.join(ROOT, "_debug"), exist_ok=True)
+        dumpf = open(VIDEO_DUMP, "wb")
+        framelog = open(FRAMES_LOG, "w")
+    else:
+        dumpf = open(os.devnull, "wb")
+        framelog = open(os.devnull, "w")
 
     # Pick the Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file.
     ffmpeg_proc = None
@@ -360,9 +369,15 @@ async def main():
                 state["fatal_reason"] = f"video sink failed ({type(e).__name__})"
                 log("sink write err:", e)
                 return
-            if state["vframes"] <= 8 or state["vframes"] % 30 == 0:
+            progress_now = time.monotonic()
+            if state["vframes"] == 1:
+                state["last_video_log"] = progress_now
                 log(f"VIDEO #{state['vframes']} cmd={cmdid} link={link} payload={len(payload)} "
                     f"nal={payload[:8].hex()} total={state['vbytes']}")
+                log(f"PERF first_video_ms={int((progress_now - perf_started) * 1000)}")
+            elif progress_now - state.get("last_video_log", 0.0) >= 5.0:
+                state["last_video_log"] = progress_now
+                log(f"VIDEO_PROGRESS frames={state['vframes']} bytes={state['vbytes']}")
             if state["vframes"] <= 20:
                 framelog.write(json.dumps({"video": True, "cmd": cmdid, "link": link, "n": state["vframes"],
                                            "plen": len(payload), "nal": payload[:24].hex()}) + "\n"); framelog.flush()

@@ -31,8 +31,10 @@ def test_ipv6_management_and_rtsp_urls():
 
 
 class Response:
-    def __init__(self, payload=None, error=None):
-        self.payload, self.error = payload, error
+    def __init__(self, payload=None, error=None, body=None, content_type="application/json"):
+        self.payload, self.error, self.body = payload, error, body
+        self.headers = {"Content-Type": content_type}
+        self.content_length = len(body) if body is not None else None
     async def __aenter__(self):
         return self
     async def __aexit__(self, *args):
@@ -44,6 +46,10 @@ class Response:
         if self.error:
             raise self.error
         return self.payload
+    async def read(self):
+        if self.error:
+            raise self.error
+        return self.body
 
 
 def client(response):
@@ -85,6 +91,36 @@ async def test_client_sends_basic_auth_without_putting_credentials_in_url():
     assert args == ("http://bridge.local:1985/api/streams",)
     assert kwargs["headers"]["Authorization"].startswith("Basic ")
     assert "0123456789abcdef" not in args[0]
+
+
+@pytest.mark.asyncio
+async def test_client_fetches_one_cached_full_size_jpeg():
+    jpeg = b"\xff\xd8image\xff\xd9"
+    session = CapturingSession(Response(body=jpeg, content_type="image/jpeg"))
+    instance = api.Go2RtcClient(
+        session, "bridge.local", 1985, 10, "eufy", "0123456789abcdef"
+    )
+
+    assert await instance.async_get_frame("eufy_front_gate") == jpeg
+    args, kwargs = session.request
+    assert args == ("http://bridge.local:1985/api/frame.jpeg",)
+    assert kwargs["params"] == {"src": "eufy_front_gate", "cache": "30s"}
+    assert "width" not in kwargs["params"]
+    assert kwargs["headers"]["Authorization"].startswith("Basic ")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body,content_type",
+    [(b"", "image/jpeg"), (b"not jpeg", "image/jpeg"), (b"\xff\xd8x\xff\xd9", "text/plain")],
+)
+async def test_client_rejects_invalid_snapshot(body, content_type):
+    session = CapturingSession(Response(body=body, content_type=content_type))
+    instance = api.Go2RtcClient(
+        session, "bridge.local", 1985, 10, "eufy", "0123456789abcdef"
+    )
+    with pytest.raises(api.Go2RtcPayloadError):
+        await instance.async_get_frame("eufy_front_gate")
 
 
 @pytest.mark.asyncio

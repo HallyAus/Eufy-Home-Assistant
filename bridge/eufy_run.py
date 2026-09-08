@@ -28,6 +28,13 @@ SIGNAL_TIMEOUT = max(10, min(int(os.environ.get("EUFY_SIGNAL_TIMEOUT", "25")), 1
 FIRST_FRAME_TIMEOUT = max(15, min(int(os.environ.get("EUFY_FIRST_FRAME_TIMEOUT", "50")), 180))
 CONNECTION_TIMEOUT = max(10, min(int(os.environ.get("EUFY_CONNECTION_TIMEOUT", "35")), 180))
 STALL_TIMEOUT = max(10, min(int(os.environ.get("EUFY_STALL_TIMEOUT", "25")), 180))
+SESSION_LOCK_PATH = Path(
+    os.environ.get(
+        "EUFY_SESSION_LOCK",
+        "/data/eufy-session.lock" if Path("/data").is_dir() else ROOT / "eufy-session.lock",
+    )
+)
+SESSION_LOCK_POLL = 0.10
 
 
 @dataclass
@@ -40,6 +47,7 @@ class SessionState:
     last_video_at: float | None = None
     turn_pending: bool = False
     authorization_rejection: bool = False
+    busy_rejection: bool = False
 
 
 def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
@@ -51,13 +59,17 @@ def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
     elif "scall/turn status 200" in line:
         state.turn_pending = False
         state.last_progress = now
+    elif "scall/turn status 486" in line:
+        state.turn_pending = False
+        state.busy_rejection = True
+        state.last_progress = now
     if "NVR SDP offer received" in line:
         state.sdp_seen = True
         state.last_progress = now
     if "DC open: WebrtcDataChannel" in line:
         state.datachannel_seen = True
         state.last_progress = now
-    if "VIDEO #" in line:
+    if "VIDEO #" in line or "VIDEO_PROGRESS" in line:
         if state.first_video_at is None:
             state.first_video_at = now
         state.last_video_at = now
@@ -67,6 +79,45 @@ def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
     # -104. Never infer authorization from payload length or replacement bytes.
     if "EUFY_AUTHORIZATION_ERROR_-104" in line:
         state.authorization_rejection = True
+
+
+class SessionGate:
+    """Cross-process exclusive gate for the NVR's single live session."""
+
+    def __init__(self, path: Path = SESSION_LOCK_PATH) -> None:
+        self.path = path
+        self.handle = None
+
+    async def acquire(self, stop_event: asyncio.Event) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+b")
+        if os.name == "nt":
+            # The production add-on is Linux. Windows standalone runs retain the
+            # in-process behavior rather than pretending msvcrt locks are flock.
+            return True
+        import fcntl
+
+        while not stop_event.is_set():
+            try:
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except BlockingIOError:
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=SESSION_LOCK_POLL)
+                except asyncio.TimeoutError:
+                    pass
+        self.release()
+        return False
+
+    def release(self) -> None:
+        if self.handle is None:
+            return
+        if os.name != "nt":
+            import fcntl
+
+            fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        self.handle.close()
+        self.handle = None
 
 
 async def _terminate_tree(proc: asyncio.subprocess.Process) -> None:
@@ -153,6 +204,10 @@ async def run_attempt(
                 reason = "authorization"
                 await _terminate_tree(proc)
                 break
+            if state.busy_rejection:
+                reason = "busy"
+                await _terminate_tree(proc)
+                break
             if not state.sdp_seen and now - state.started_at >= SIGNAL_TIMEOUT:
                 reason = "signaling_timeout"
                 await _terminate_tree(proc)
@@ -188,6 +243,7 @@ async def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     discovery = "--discover" in args
     stop_event = asyncio.Event()
+    gate = SessionGate()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
@@ -215,7 +271,12 @@ async def main(argv: list[str] | None = None) -> int:
             except asyncio.TimeoutError:
                 pass
 
-        rc, reason, state = await run_attempt(args, discovery, stop_event)
+        if not await gate.acquire(stop_event):
+            return 0
+        try:
+            rc, reason, state = await run_attempt(args, discovery, stop_event)
+        finally:
+            gate.release()
 
         if reason == "shutdown":
             return 0
@@ -229,6 +290,15 @@ async def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
             return 78
+
+        if reason == "busy" and not discovery:
+            print(
+                "EUFY_NVR_BUSY_486: another camera or the eufy app owns the NVR live session; "
+                "failing fast so a waiting viewer can retry without a 25-second dead period.",
+                file=sys.stderr,
+                flush=True,
+            )
+            return 75
 
         if discovery and rc == 0:
             return 0
@@ -258,6 +328,13 @@ async def main(argv: list[str] | None = None) -> int:
         elif reason == "stream_stall":
             print(
                 f"eufy supervisor: no video frame for {STALL_TIMEOUT}s; restarting stalled producer",
+                file=sys.stderr,
+                flush=True,
+            )
+        elif reason == "busy":
+            print(
+                "eufy supervisor: NVR reported signaling status 486 (busy); "
+                "releasing the session gate before retry",
                 file=sys.stderr,
                 flush=True,
             )

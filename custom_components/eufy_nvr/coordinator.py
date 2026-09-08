@@ -79,3 +79,7 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             ", ".join(sorted(streams)) or "(none)",
         )
         return streams
+
+    async def async_get_frame(self, stream: str) -> bytes:
+        """Fetch one snapshot through go2rtc's coalescing JPEG endpoint."""
+        return await self._client.async_get_frame(stream)

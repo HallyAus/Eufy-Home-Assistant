@@ -82,7 +82,8 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn(f'GO2RTC_API_PORT="{self.EUFY_API_PORT}"', run_script)
         self.assertIn(f'GO2RTC_RTSP_PORT="{self.EUFY_RTSP_PORT}"', run_script)
         self.assertIn(f'GO2RTC_WEBRTC_PORT="{self.EUFY_WEBRTC_PORT}"', run_script)
-        self.assertIn(f"127.0.0.1:{self.EUFY_API_PORT}/api", dockerfile)
+        self.assertIn(f"/dev/tcp/127.0.0.1/{self.EUFY_API_PORT}", dockerfile)
+        self.assertNotIn(f"127.0.0.1:{self.EUFY_API_PORT}/api", dockerfile)
 
         for occupied_port in (1984, 8554, 8555):
             self.assertNotRegex(config, rf"(?m)^\s+{occupied_port}/(?:tcp|udp):")
@@ -103,12 +104,17 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertNotIn("fetch_deps.js ||", dockerfile)
         self.assertIn("node sctp_oracle.js selftest", dockerfile)
 
-    def test_keep_warm_preserves_one_stream_per_line(self):
+    def test_adaptive_warm_never_launches_one_transcoder_per_camera(self):
         run_script = (ROOT / "eufy_nvr/run.sh").read_text()
+        warmer = (ROOT / "bridge/eufy_warm.py").read_text()
 
-        self.assertIn("mapfile -t streams", run_script)
-        self.assertIn("sed 's/^[[:space:]]*//'", run_script)
-        self.assertNotIn("tr -d '[:space:]'", run_script)
+        self.assertIn("start_adaptive_warmer", run_script)
+        self.assertIn("adaptive_warm_seconds", run_script)
+        self.assertIn("external_consumer_counts", warmer)
+        self.assertNotIn("for s in", run_script)
+        self.assertNotIn("rtsp://127.0.0.1", run_script)
+        self.assertNotIn("create_subprocess", warmer)
+        self.assertIn("/api/stream.ts", warmer)
 
     def test_token_refresh_does_not_depend_on_keep_warm(self):
         run_script = (ROOT / "eufy_nvr/run.sh").read_text()
@@ -119,10 +125,8 @@ class ReleasePackagingTest(unittest.TestCase):
         ).group("body")
 
         self.assertIn("start_relogin_timer", background_block)
-        self.assertLess(
-            background_block.index("start_relogin_timer"),
-            background_block.index('if [ "${KEEP_WARM}" = \'true\' ]; then'),
-        )
+        self.assertIn("start_adaptive_warmer", background_block)
+        self.assertLess(background_block.index("start_relogin_timer"), background_block.index("start_adaptive_warmer"))
 
     def test_signing_credentials_are_not_logged(self):
         stream_script = (ROOT / "bridge/eufy_stream.py").read_text()

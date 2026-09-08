@@ -41,9 +41,18 @@ def test_video_progress_tracks_first_and_latest_frame():
     first = current.first_video_at
     assert first is not None
     assert current.last_video_at == first
-    supervisor.inspect_log_line("[12:00:04] VIDEO #30 cmd=1300", current, False)
+    supervisor.inspect_log_line("[12:00:08] VIDEO_PROGRESS frames=125 bytes=1000", current, False)
     assert current.last_video_at is not None
     assert current.last_video_at >= first
+
+
+def test_busy_status_is_classified_immediately():
+    current = state()
+    supervisor.inspect_log_line("[12:00:00] scall/turn status 100", current, False)
+    supervisor.inspect_log_line("[12:00:01] scall/turn status 486", current, False)
+    assert current.turn_pending is False
+    assert current.busy_rejection is True
+    assert current.sdp_seen is False
 
 
 def test_explicit_oracle_status_is_classified_as_authorization_failure():
@@ -92,3 +101,4 @@ def test_supervisor_limits_are_bounded():
     assert 15 <= supervisor.FIRST_FRAME_TIMEOUT <= 180
     assert 10 <= supervisor.CONNECTION_TIMEOUT <= 180
     assert 10 <= supervisor.STALL_TIMEOUT <= 180
+    assert 0 < supervisor.SESSION_LOCK_POLL <= 1

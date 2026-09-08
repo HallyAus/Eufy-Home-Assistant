@@ -93,7 +93,7 @@ COPY run.sh /run.sh
 RUN chmod a+x /run.sh
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:1985/api || exit 1
+    CMD bash -c 'exec 3<>/dev/tcp/127.0.0.1/1985' || exit 1
 
 WORKDIR /opt/eufy/bridge
 CMD [ "/run.sh" ]

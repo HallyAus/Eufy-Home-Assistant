@@ -25,9 +25,11 @@ def test_go2rtc_generation_is_restricted_and_tolerates_cold_start():
     source = (ROOT / "bridge/gen_go2rtc.py").read_text()
     assert "starttimeout=" in source
     assert "killtimeout=" in source
-    assert "modules: [api, rtsp, webrtc, exec]" in source
+    assert "modules: [api, rtsp, webrtc, exec, mjpeg, mpegts]" in source
     assert "allow_paths: [python]" in source
     assert "/api/streams" in source
+    assert "/api/frame.jpeg" in source
+    assert "/api/stream.ts" in source
     assert "eufy_run.py" in source
 
 

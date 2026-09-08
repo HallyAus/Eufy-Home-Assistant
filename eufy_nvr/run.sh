@@ -32,6 +32,7 @@ export EUFY_REGION="$(bashio::config 'region' 'US')"
 export EUFY_AUTH="${STATE_DIR}/auth.json"
 export EUFY_CAMERAS="${STATE_DIR}/cameras.json"
 export EUFY_STREAM_NAMES="${STATE_DIR}/stream_names.json"
+export EUFY_SESSION_LOCK="${STATE_DIR}/eufy-session.lock"
 export GO2RTC_USERNAME="$(bashio::config 'go2rtc_username')"
 export GO2RTC_PASSWORD="$(bashio::config 'go2rtc_password')"
 if [ "${#GO2RTC_PASSWORD}" -lt 16 ]; then
@@ -152,31 +153,24 @@ if bashio::config.true 'video_copy'; then
     bashio::log.warning "video_copy=true -> publishing raw H.265 (live view will be thumbnail-only)."
 fi
 
-KEEP_WARM="$(bashio::config 'keep_warm' 'false')"
-WARM_PIDS=()
 RELOGIN_PID=""
+ADAPTIVE_WARM_PID=""
 
-start_warmers() {
-    local s streams i=0
-    mapfile -t streams < <(grep -E '^[[:space:]]+eufy_[a-z0-9_]+:' "${CONFIG_PATH}" \
-        | sed 's/:.*$//' | sed 's/^[[:space:]]*//')
-    if [ "${#streams[@]}" -eq 0 ]; then
-        bashio::log.warning "keep-warm: no online streams in go2rtc.yaml; nothing to warm."
+start_adaptive_warmer() {
+    local seconds
+    seconds="$(bashio::config 'adaptive_warm_seconds' '30')"
+    if bashio::config.true 'keep_warm'; then
+        bashio::log.warning "keep_warm is deprecated; using a bounded 300-second one-camera lease instead."
+        seconds=300
+    fi
+    if ! [ "${seconds}" -gt 0 ] 2>/dev/null; then
+        bashio::log.info "adaptive warm lease disabled."
         return 0
     fi
-    bashio::log.info "keep-warm: warming ${#streams[@]} camera(s) (staggered)."
-    for s in "${streams[@]}"; do
-        [ -n "${s}" ] || continue
-        ( sleep "$(( i * 6 + 3 ))"
-          while true; do
-            ffmpeg -hide_banner -loglevel error -rtsp_transport tcp \
-                -i "rtsp://127.0.0.1:${GO2RTC_RTSP_PORT}/${s}" -an -f null - >/dev/null 2>&1 || true
-            sleep 4
-          done ) &
-        WARM_PIDS+=("$!")
-        bashio::log.info "keep-warm: ${s} (pid $!)."
-        i=$(( i + 1 ))
-    done
+    if [ "${seconds}" -gt 600 ]; then seconds=600; fi
+    python3 eufy_warm.py --seconds "${seconds}" &
+    ADAPTIVE_WARM_PID=$!
+    bashio::log.info "adaptive warm lease enabled (${seconds}s, one camera maximum)."
 }
 
 start_relogin_timer() {
@@ -201,8 +195,7 @@ start_relogin_timer() {
 term() {
     bashio::log.info "Received stop signal; shutting down go2rtc (pid ${GO2RTC_PID:-?}) + warmers."
     [ -n "${RELOGIN_PID:-}" ] && kill "${RELOGIN_PID}" 2>/dev/null || true
-    for p in "${WARM_PIDS[@]:-}"; do [ -n "${p}" ] && kill "${p}" 2>/dev/null || true; done
-    if command -v pkill >/dev/null 2>&1; then pkill -f "rtsp://127.0.0.1:${GO2RTC_RTSP_PORT}/eufy_" 2>/dev/null || true; fi
+    [ -n "${ADAPTIVE_WARM_PID:-}" ] && kill "${ADAPTIVE_WARM_PID}" 2>/dev/null || true
     [ -n "${GO2RTC_PID:-}" ] && kill -TERM "${GO2RTC_PID}" 2>/dev/null || true
     exit 0
 }
@@ -218,9 +211,7 @@ while true; do
 
     if [ "${BACKGROUND_TASKS_STARTED}" -eq 0 ]; then
         start_relogin_timer
-        if [ "${KEEP_WARM}" = 'true' ]; then
-            start_warmers
-        fi
+        start_adaptive_warmer
         BACKGROUND_TASKS_STARTED=1
     fi
 

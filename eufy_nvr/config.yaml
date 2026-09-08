@@ -65,6 +65,7 @@ options:
   country: ""
   log_level: "info"
   keep_warm: false
+  adaptive_warm_seconds: 30
   token_refresh_hours: 6
   video_copy: false
   verification_code: ""
@@ -76,14 +77,16 @@ schema:
   region: list(US|EU|IE)?
   country: str?
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
-  # keep_warm: hold each online camera warm so HA live-view opens instantly (no 5-13s cold start).
-  #   DEFAULT OFF: it costs one continuous H.264 transcode per online camera -> only enable on a
-  #   host with CPU headroom (a low-power aarch64/RPi can be saturated by 3-4 always-on encodes).
+  # keep_warm: deprecated compatibility switch. When true, retains only the last-viewed camera
+  #   for 300 seconds; it never starts one permanent producer per camera.
   keep_warm: bool?
+  # adaptive_warm_seconds: retain the most recently viewed camera after its last consumer so
+  #   reopening is instant. A different camera preempts it. Set 0 to disable; maximum 600.
+  adaptive_warm_seconds: int(0,600)?
   # token_refresh_hours: how often to re-login and refresh auth.json (the eufy token is ~1-day).
   token_refresh_hours: int(0,)?
   # video_copy: publish raw H.265 instead of transcoding to H.264 (lower CPU, but the browser live
-  #   view shows the still thumbnail only). Pair with keep_warm for a low-CPU always-on warm.
+  #   view shows the still thumbnail only). The adaptive warmer itself never adds a transcode.
   video_copy: bool?
   station_sn: str?
   captcha_id: str?

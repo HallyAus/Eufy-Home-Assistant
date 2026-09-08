@@ -147,7 +147,7 @@ def render_config(
     lines = [
         "# Generated from validated discovery state. Online, on-demand streams.",
         "app:",
-        "  modules: [api, rtsp, webrtc, exec]",
+        "  modules: [api, rtsp, webrtc, exec, mjpeg, mpegts]",
         "",
         "streams:" if online else "streams: {}",
     ]
@@ -172,7 +172,7 @@ def render_config(
         f"  username: {json.dumps(username)}",
         f"  password: {json.dumps(password)}",
         "  local_auth: false",
-        "  allow_paths: [/api, /api/streams, /api/webrtc, /api/frame.jpeg]",
+        "  allow_paths: [/api, /api/streams, /api/webrtc, /api/frame.jpeg, /api/stream.ts]",
         "",
         "webrtc:",
         f'  listen: ":{webrtc_port}"',

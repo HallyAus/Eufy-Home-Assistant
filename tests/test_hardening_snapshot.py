@@ -60,15 +60,14 @@ async def test_none_has_only_short_failure_cooldown():
 
 
 @pytest.mark.asyncio
-async def test_exception_does_not_return_old_image():
+async def test_exception_returns_bounded_stale_image():
     now = [0.0]
     capture = AsyncMock(side_effect=[b"old", OSError("unavailable"), b"new"])
     cache = SnapshotCache(clock=lambda: now[0])
     assert await cache.async_get(1, capture) == b"old"
     now[0] = 4.0
-    with pytest.raises(OSError):
-        await cache.async_get(1, capture)
-    assert await cache.async_get(1, capture) is None
+    assert await cache.async_get(1, capture) == b"old"
+    assert await cache.async_get(1, capture) == b"old"
     now[0] = 5.0
     assert await cache.async_get(1, capture) == b"new"
 
@@ -114,7 +113,7 @@ async def test_clear_removes_cached_images():
     assert await cache.async_get(1, capture) == b"fresh"
 
 
-@pytest.mark.parametrize("options", [{"ttl": 0}, {"timeout": 0}, {"max_entries": 0}, {"failure_ttl": -1}])
+@pytest.mark.parametrize("options", [{"ttl": 0}, {"timeout": 0}, {"max_entries": 0}, {"failure_ttl": -1}, {"ttl": 5, "stale_ttl": 4}])
 def test_invalid_cache_limits(options):
     with pytest.raises(ValueError):
         SnapshotCache(**options)

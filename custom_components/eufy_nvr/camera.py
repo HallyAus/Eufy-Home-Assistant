@@ -11,7 +11,6 @@ import logging
 from typing import Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
-from homeassistant.components.ffmpeg import async_get_image
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -97,7 +96,7 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
         Camera.__init__(self)
 
         self._stream = stream
-        self._snapshot_cache = SnapshotCache()
+        self._snapshot_cache = SnapshotCache(ttl=30.0, stale_ttl=300.0)
         self._stream_source = rtsp_url(
             host, rtsp_port, stream, username, password
         )
@@ -133,12 +132,10 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
             return None
 
         async def capture() -> bytes | None:
-            return await async_get_image(
-                self.hass, self._stream_source, width=width, height=height
-            )
+            return await self.coordinator.async_get_frame(self._stream)
 
         try:
-            image = await self._snapshot_cache.async_get((width, height), capture)
+            image = await self._snapshot_cache.async_get("frame", capture)
             if not self.available:
                 self._snapshot_cache.clear()
                 return None

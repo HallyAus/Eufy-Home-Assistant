@@ -8,7 +8,9 @@ from typing import Any
 from urllib.parse import quote, urlsplit
 
 API_STREAMS_PATH = "/api/streams"
+API_FRAME_PATH = "/api/frame.jpeg"
 STREAM_PREFIX = "eufy_"
+MAX_FRAME_BYTES = 20 * 1024 * 1024
 
 
 class Go2RtcError(Exception):
@@ -136,6 +138,11 @@ def api_url(host: str, port: int) -> str:
     return f"{api_base_url(host, port)}{API_STREAMS_PATH}"
 
 
+def frame_url(host: str, port: int) -> str:
+    """Build the go2rtc JPEG snapshot URL without query data or credentials."""
+    return f"{api_base_url(host, port)}{API_FRAME_PATH}"
+
+
 def rtsp_url(
     host: str, port: int, stream: str, username: str, password: str
 ) -> str:
@@ -208,6 +215,7 @@ class Go2RtcClient:
         self.api_port = validate_port(api_port)
         username, password = validate_credentials(username, password)
         self.url = api_url(self.host, self.api_port)
+        self.frame_url = frame_url(self.host, self.api_port)
         self.total_stream_count = 0
         self._session = session
         self._timeout = timeout
@@ -243,3 +251,45 @@ class Go2RtcClient:
             raise Go2RtcPayloadError(
                 f"unexpected go2rtc response from {self.url}"
             ) from err
+
+    async def async_get_frame(self, stream: str) -> bytes:
+        """Fetch a cached JPEG directly from go2rtc.
+
+        Width and height are deliberately omitted: go2rtc 1.9.14 keys its JPEG
+        cache by stream name, not rendition dimensions. One full frame per
+        camera avoids wrong-sized cache hits and lets Home Assistant scale it.
+        """
+        from aiohttp import ClientError, ClientResponseError
+
+        if not isinstance(stream, str) or not stream.startswith(STREAM_PREFIX):
+            raise Go2RtcPayloadError("invalid Eufy stream name")
+        try:
+            async with self._session.get(
+                self.frame_url,
+                params={"src": stream, "cache": "30s"},
+                timeout=min(self._timeout, 9),
+                headers=self._headers,
+            ) as response:
+                response.raise_for_status()
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0]
+                if content_type.lower() != "image/jpeg":
+                    raise Go2RtcPayloadError("go2rtc snapshot was not JPEG")
+                if response.content_length and response.content_length > MAX_FRAME_BYTES:
+                    raise Go2RtcPayloadError("go2rtc snapshot exceeded the size limit")
+                frame = await response.read()
+        except Go2RtcPayloadError:
+            raise
+        except ClientResponseError as err:
+            raise Go2RtcConnectionError(
+                f"go2rtc returned HTTP {err.status} from the snapshot endpoint"
+            ) from err
+        except (ClientError, TimeoutError) as err:
+            raise Go2RtcConnectionError("cannot fetch the go2rtc snapshot") from err
+        if (
+            not frame
+            or len(frame) > MAX_FRAME_BYTES
+            or not frame.startswith(b"\xff\xd8")
+            or not frame.endswith(b"\xff\xd9")
+        ):
+            raise Go2RtcPayloadError("go2rtc returned an invalid JPEG snapshot")
+        return frame
