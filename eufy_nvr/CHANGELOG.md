@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.6
+
+- Reduce go2rtc's idle producer kill delay from eight seconds to one. The adaptive warmer already
+  owns intentional reuse, so the old delay only consumed almost all of Home Assistant's nine-second
+  snapshot deadline when handing the NVR's single session to another camera.
+- Keep the cross-process Eufy session gate locked for a separate one-second appliance teardown grace
+  period. This prevents the next producer from racing the NVR's internal WebRTC cleanup and receiving
+  signaling status `486`.
+- Add credential-free adaptive-controller startup/API diagnostics for live deployment verification.
+
 ## 0.7.5
 
 - Prime one snapshot per camera sequentially after Home Assistant loads the integration, then refresh
