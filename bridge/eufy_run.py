@@ -126,10 +126,22 @@ class SessionGate:
 async def _terminate_tree(proc: asyncio.subprocess.Process) -> None:
     if os.name == "nt" and proc.returncode is not None:
         return
+    if os.name != "nt" and proc.returncode is None:
+        # Give the protocol engine a chance to send closeLive (cmd 1004).
+        # Signal only the engine/session leader first; its oracle and ffmpeg
+        # children must remain alive briefly so the framed close reaches the NVR.
+        try:
+            os.kill(proc.pid, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=1.5)
+        except asyncio.TimeoutError:
+            pass
     try:
-        if os.name != "nt":
+        if os.name != "nt" and proc.returncode is None:
             os.killpg(proc.pid, signal.SIGTERM)
-        else:
+        elif os.name == "nt" and proc.returncode is None:
             proc.terminate()
     except ProcessLookupError:
         pass

@@ -295,7 +295,7 @@ async def main():
     chans = {}
     state = {"connected": False, "started": False, "vbytes": 0, "vframes": 0, "ptcs_in": 0,
              "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False,
-             "fatal_reason": None, "shutting_down": False}
+             "fatal_reason": None, "shutting_down": False, "close_sent": False}
     if CAPTURE_DEBUG:
         os.makedirs(os.path.join(ROOT, "_debug"), exist_ok=True)
         dumpf = open(VIDEO_DUMP, "wb")
@@ -458,6 +458,28 @@ async def main():
                 f"frames_seen={state['frames_seen']}  (+{cur[0]-last[0]} pkts, +{cur[1]-last[1]} vid /4s)")
             last = cur
 
+    async def close_live():
+        """Tell the NVR to retire its live session before closing WebRTC."""
+        channel = chans.get("WebrtcDataChannel")
+        if (
+            DISCOVER
+            or state["close_sent"]
+            or not state["started"]
+            or channel is None
+            or channel.readyState != "open"
+        ):
+            return
+        state["close_sent"] = True
+        try:
+            close = build_cmd(USER_ID, 1004, {})
+            log(f"-> closeLive (1004) len={len(close)}")
+            oracle.push_send(1, close)
+            # The oracle frames asynchronously; leave the data channel open
+            # long enough for its tx callback to put the command on the wire.
+            await asyncio.sleep(0.35)
+        except Exception as error:
+            log("closeLive send failed:", type(error).__name__)
+
     def maybe_start():
         if state["connected"] and state["cmd_dc_open"] and not state["started"]:
             state["started"] = True
@@ -582,6 +604,7 @@ async def main():
             log("ws loop err:", repr(e))
         finally:
             state["shutting_down"] = True
+            await close_live()
             if ffmpeg_watchdog_task is not None and not ffmpeg_watchdog_task.done():
                 ffmpeg_watchdog_task.cancel()
                 await asyncio.gather(ffmpeg_watchdog_task, return_exceptions=True)

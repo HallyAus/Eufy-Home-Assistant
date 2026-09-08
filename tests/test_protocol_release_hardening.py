@@ -33,6 +33,16 @@ def test_go2rtc_generation_is_restricted_and_tolerates_cold_start():
     assert "eufy_run.py" in source
 
 
+def test_live_sessions_are_closed_before_process_teardown():
+    stream = (ROOT / "bridge/eufy_stream.py").read_text()
+    supervisor = (ROOT / "bridge/eufy_run.py").read_text()
+
+    assert "build_cmd(USER_ID, 1004, {})" in stream
+    assert "-> closeLive (1004)" in stream
+    assert "await close_live()" in stream
+    assert "os.kill(proc.pid, signal.SIGINT)" in supervisor
+
+
 def test_release_versions_and_go2rtc_are_aligned():
     manifest = json.loads((ROOT / "custom_components/eufy_nvr/manifest.json").read_text())
     config = (ROOT / "eufy_nvr/config.yaml").read_text()
