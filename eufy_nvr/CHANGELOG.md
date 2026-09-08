@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.11
+
+- Add a direct cross-process preemption hint from a queued Eufy producer to the adaptive warm controller.
+  go2rtc does not expose a waiting consumer until its producer starts, so API-only observation could not see a
+  different camera blocked behind the retained session. The session gate now evicts that warm lease immediately,
+  while same-camera reopens still reuse the existing producer without spawning a waiter.
+
 ## 0.7.10
 
 - Preserve the post-`closeLive` appliance teardown grace during normal go2rtc camera handoffs. The graceful
