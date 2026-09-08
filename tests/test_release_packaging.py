@@ -14,6 +14,17 @@ class ReleasePackagingTest(unittest.TestCase):
     EUFY_RTSP_PORT = 8556
     EUFY_WEBRTC_PORT = 8557
 
+    def test_github_actions_are_pinned_to_commits(self):
+        workflows = (ROOT / ".github/workflows").glob("*.yml")
+        action_refs = []
+        for workflow in workflows:
+            action_refs.extend(
+                re.findall(r"uses:\s+actions/[^@\s]+@([^\s#]+)", workflow.read_text())
+            )
+        self.assertTrue(action_refs)
+        for ref in action_refs:
+            self.assertRegex(ref, r"^[0-9a-f]{40}$")
+
     def test_integration_addon_versions_match_and_build_source_exists(self):
         manifest_version = json.loads(
             (ROOT / "custom_components/eufy_nvr/manifest.json").read_text()
