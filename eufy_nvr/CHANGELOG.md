@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.4
+
+- Serialize access to the NVR's single live WebRTC session across every camera producer and classify
+  signaling status `486` immediately, eliminating the 25-second timeout/retry cascades caused by
+  concurrent Home Assistant dashboard requests.
+- Replace the permanent per-camera `keep_warm` processes with an Eufy-specific adaptive session
+  controller. It holds only the most recently viewed camera for 30 seconds by default, hands the
+  session to a newly requested camera, and carries credentials only in authenticated HTTP headers.
+- Serve snapshots through go2rtc's authenticated, coalescing JPEG endpoint instead of launching a
+  second Home Assistant FFmpeg process. Cache a fresh frame for 30 seconds and use a bounded stale
+  frame during transient camera handoffs so dashboards reopen immediately.
+- Start cloud signing and the SCTP framing runtime in parallel, disable debug-frame disk writes unless
+  explicitly requested, and reduce per-frame hot-path logging while retaining five-second progress
+  markers for stall detection.
+- Change the container health check to an authentication-independent TCP probe so enabling required
+  go2rtc credentials cannot make a healthy add-on appear unhealthy.
+
 ## 0.7.3
 
 - Make the Dockerfile self-contained with a pinned multi-architecture Debian base image. Current Home

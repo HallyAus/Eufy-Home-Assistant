@@ -5,9 +5,10 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** v0.7.3 fixes installation on current Home Assistant Supervisor releases and
-> includes Eufy mailbox/device verification, account-bound auth caches, authenticated LAN access,
-> stricter process supervision, and verified immutable build inputs. The
+> **Status: experimental.** v0.7.4 serializes the NVR's single live session, retains only the
+> last-viewed camera with an adaptive lease, and serves coalesced cached JPEGs directly to Home Assistant.
+> It also includes Eufy mailbox/device verification, account-bound auth caches, authenticated LAN access,
+> strict process supervision, and verified immutable build inputs. The
 > HACS integration, **"Eufy NVR (local)"**, auto-creates the camera
 > entities from the bridge's go2rtc; install it separately from this repo.
 
@@ -34,6 +35,8 @@ cloud; the video itself is pulled LAN-direct from the NVR.
    - `log_level` -> `info` (raise to `debug` only when troubleshooting)
    - `go2rtc_username` / `go2rtc_password` -> required local credentials shared with the companion
      integration; use a password of at least 16 characters
+   - `adaptive_warm_seconds` -> retain only the last-viewed camera for this many seconds after it closes
+     (default `30`; a different camera preempts it; set `0` to disable)
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
      captcha (the log prints the `captcha_id`; solve it and set both, then restart).
@@ -68,7 +71,9 @@ log and shown in the go2rtc UI. To surface them as camera entities, either:
 
 Streams are **on-demand**: the engine only connects to the NVR while something is actually pulling a
 stream, so the single live session is freed when nobody is watching. go2rtc 1.9.14 is configured with
-a 60-second exec `starttimeout` so slow Eufy WebRTC cold starts are not killed prematurely.
+a 60-second exec `starttimeout` so slow Eufy WebRTC cold starts are not killed prematurely. An
+Eufy-specific controller holds only the most recently viewed producer for a short adaptive lease and
+hands the single NVR session to a newly requested camera.
 
 ## Ports
 
@@ -89,14 +94,16 @@ HA), so these ports are opened directly on the host.
   go2rtc configuration, and stable stream-name registry in `/data`, so transient failures or camera
   renames do not destroy working state.
 - **Automatic boot** brings the bridge back after a Home Assistant host restart.
-- **Periodic authentication refresh** runs for both on-demand and `keep_warm` streams, preventing an
+- **Periodic authentication refresh** runs independently of camera demand, preventing an
   expired cloud signaling session from leaving healthy local go2rtc ports with unusable producers.
 - **In-process supervise loop** in `run.sh` restarts go2rtc on a plain crash with exponential backoff
   (2s -> 60s cap), recovering faster than a full container bounce and without hammering the NVR.
 - Generated camera and go2rtc state is validated before replacement and written atomically.
-- Concurrent Home Assistant thumbnail requests are coalesced for a short period to avoid redundant
-  ffmpeg captures against the same cold camera stream.
-- A Docker `HEALTHCHECK` hits the same API endpoint.
+- Concurrent Home Assistant thumbnail requests use go2rtc's authenticated cached-JPEG endpoint and a
+  bounded stale fallback, avoiding redundant Home Assistant FFmpeg captures against a cold stream.
+- A cross-process gate prevents competing cameras from opening simultaneous sessions against the NVR;
+  signaling status `486` is classified immediately instead of waiting for the signaling timeout.
+- A Docker `HEALTHCHECK` probes the local go2rtc TCP listener without bypassing API authentication.
 
 ## Troubleshooting
 
@@ -118,6 +125,8 @@ HA), so these ports are opened directly on the host.
 - **go2rtc `exec: timeout` / discovery works but live video does not** — v0.7 uses go2rtc 1.9.14 and a
   longer producer startup window. If it still fails, capture the per-camera `eufy_stream.py` signalling
   lines; the remaining fault is inside the live-session handshake rather than camera discovery.
+- **`scall/turn status 486`** — another client, commonly the official eufy app, owns the NVR's one live
+  session. Close that live view and retry; the add-on itself never opens competing camera sessions.
 - **Image build fails at `fetch_deps` or the SCTP self-test** — eufy changed or removed the framing
   runtime. Match `SCTP_VERSION` in `bridge/fetch_deps.js` + `bridge/sctp_oracle.js` to the web
   client's current `versionControl.verLibsctp`, then rebuild. The add-on deliberately refuses to

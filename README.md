@@ -108,7 +108,9 @@ exposes plain RTSP via a local **go2rtc**; Home Assistant simply pulls it.
 ```
 
 **On-demand:** go2rtc only spawns the engine while something is actually watching, so the NVR's single live
-session isn't held 24/7 (important — the NVR allows one active stream at a time).
+session isn't held 24/7 (important — the NVR allows one active stream at a time). An Eufy-specific session
+controller serializes competing camera requests and retains only the most recently viewed producer for a
+short adaptive lease; go2rtc remains the standards-compliant RTSP/WebRTC and cached-JPEG transport.
 
 ---
 
@@ -126,6 +128,8 @@ Runs everything on your HA host; no always-on PC and no token paste.
    - `log_level` — `info` (raise to `debug` only when troubleshooting)
    - `go2rtc_username` / `go2rtc_password` — local credentials (password: at least 16 characters) that
      protect the camera API, web UI, and RTSP streams; enter the same values in the companion integration
+   - `adaptive_warm_seconds` — how long to retain the last-viewed camera after it closes (default `30`;
+     another camera preempts it immediately; set `0` to disable)
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
    - *(optional)* `verification_code` — when the log says mailbox verification is required, enter the
@@ -239,10 +243,10 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.7.3:** fixes installation on current Home Assistant Supervisor releases with a self-contained,
-multi-architecture Debian build. It also implements Eufy's mailbox/device-verification login used by owner
-accounts, binds cached auth to the exact account, protects go2rtc's LAN API and RTSP video with required
-credentials, hardens child-process cleanup and connection timeouts, and verifies downloaded runtime assets.
+**v0.7.4:** eliminates concurrent-session startup storms with an Eufy-specific one-session gate and adaptive
+last-viewed-camera lease. Home Assistant snapshots now use go2rtc's coalesced JPEG endpoint directly, with a
+30-second fresh cache and bounded stale fallback; `486 busy` responses fail immediately instead of consuming
+the full signaling timeout. Startup work is parallelized and production frame/debug I/O is substantially lower.
 
 **v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,
@@ -262,8 +266,8 @@ and reproducible version-pinned add-on builds. It also includes region-aware sig
 
 ## Notes / limits
 
-- The NVR allows **one** active live session; rapid reconnects can briefly put it into a timeout state. The
-  on-demand design avoids holding the session when nobody's watching.
+- The NVR allows **one** active live session. The add-on serializes its own camera producers, but the official
+  eufy app can still occupy that hardware session; the add-on reports `486 busy` immediately when it does.
 - A passport login bumps the signed-in app session, so avoid logging into the eufy mobile app at the same moment
   the add-on/bridge is logging in or discovering.
 - The login/signaling uses eufy's cloud; the **video itself is LAN-local**.
