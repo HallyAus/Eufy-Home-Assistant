@@ -34,6 +34,12 @@ SESSION_LOCK_PATH = Path(
         "/data/eufy-session.lock" if Path("/data").is_dir() else ROOT / "eufy-session.lock",
     )
 )
+SESSION_PREEMPT_PATH = Path(
+    os.environ.get(
+        "EUFY_SESSION_PREEMPT",
+        "/data/eufy-preempt" if Path("/data").is_dir() else ROOT / "eufy-preempt",
+    )
+)
 SESSION_LOCK_POLL = 0.10
 SESSION_RELEASE_DELAY = max(
     0.0, min(float(os.environ.get("EUFY_SESSION_RELEASE_DELAY", "1.0")), 5.0)
@@ -87,8 +93,13 @@ def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
 class SessionGate:
     """Cross-process exclusive gate for the NVR's single live session."""
 
-    def __init__(self, path: Path = SESSION_LOCK_PATH) -> None:
+    def __init__(
+        self,
+        path: Path = SESSION_LOCK_PATH,
+        preempt_path: Path = SESSION_PREEMPT_PATH,
+    ) -> None:
         self.path = path
+        self.preempt_path = preempt_path
         self.handle = None
 
     async def acquire(self, stop_event: asyncio.Event) -> bool:
@@ -100,17 +111,36 @@ class SessionGate:
             return True
         import fcntl
 
+        last_preempt_at = 0.0
         while not stop_event.is_set():
             try:
                 fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try:
+                    self.preempt_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
                 return True
             except BlockingIOError:
+                now = time.monotonic()
+                if now - last_preempt_at >= 1.0:
+                    self.request_preempt()
+                    last_preempt_at = now
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=SESSION_LOCK_POLL)
                 except asyncio.TimeoutError:
                     pass
         self.release()
         return False
+
+    def request_preempt(self) -> None:
+        """Tell the adaptive warmer that another producer needs the session."""
+        try:
+            self.preempt_path.parent.mkdir(parents=True, exist_ok=True)
+            self.preempt_path.touch()
+        except OSError:
+            # The gate still guarantees safety if the optional latency hint
+            # cannot be written; the waiting producer remains bounded.
+            pass
 
     def release(self) -> None:
         if self.handle is None:

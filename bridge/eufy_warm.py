@@ -20,6 +20,7 @@ import os
 import signal
 import sys
 import time
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -68,6 +69,9 @@ class AdaptiveWarmer:
         self.lease_seconds = lease_seconds
         self.api_url = f"http://127.0.0.1:{os.environ.get('GO2RTC_API_PORT', '1985')}/api/streams"
         self.stream_url = f"http://127.0.0.1:{os.environ.get('GO2RTC_API_PORT', '1985')}/api/stream.ts"
+        self.preempt_path = Path(
+            os.environ.get("EUFY_SESSION_PREEMPT", "/data/eufy-preempt")
+        )
         self.username = os.environ["GO2RTC_USERNAME"]
         self.password = os.environ["GO2RTC_PASSWORD"]
         token = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
@@ -78,12 +82,26 @@ class AdaptiveWarmer:
         self.last_external_at = 0.0
         self.last_start_attempt = 0.0
         self.last_api_error_log = 0.0
+        try:
+            self.preempt_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def request_stop(self) -> None:
         self.stop_event.set()
 
     def warmer_running(self) -> bool:
         return self.warmer is not None and not self.warmer.done()
+
+    def consume_preempt_request(self) -> bool:
+        """Consume the session gate's cross-process handoff hint."""
+        try:
+            self.preempt_path.unlink()
+        except FileNotFoundError:
+            return False
+        except OSError:
+            return False
+        return True
 
     async def fetch_streams(self, session: aiohttp.ClientSession) -> dict[str, Any]:
         async with session.get(
@@ -135,6 +153,12 @@ class AdaptiveWarmer:
         log("controller started")
         async with aiohttp.ClientSession(timeout=timeout) as session:
             while not self.stop_event.is_set():
+                if self.consume_preempt_request():
+                    if self.warm_stream is not None:
+                        log("new producer requested the NVR session; preempting warm lease")
+                        await self.stop_warmer()
+                    await self.wait(POLL_INTERVAL)
+                    continue
                 try:
                     streams = await self.fetch_streams(session)
                 except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as error:

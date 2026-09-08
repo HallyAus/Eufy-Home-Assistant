@@ -41,3 +41,16 @@ def test_largest_demand_then_stable_name_wins():
         {"eufy_shed": 1, "eufy_gate": 2, "eufy_front": 2}, None
     ) == "eufy_front"
     assert warmer.choose_stream({"eufy_front": 0}, None) is None
+
+
+def test_cross_process_preemption_hint_is_consumed(tmp_path, monkeypatch):
+    monkeypatch.setenv("GO2RTC_USERNAME", "eufy")
+    monkeypatch.setenv("GO2RTC_PASSWORD", "0123456789abcdef")
+    marker = tmp_path / "preempt"
+    monkeypatch.setenv("EUFY_SESSION_PREEMPT", str(marker))
+    controller = warmer.AdaptiveWarmer(30)
+
+    marker.touch()
+    assert controller.consume_preempt_request() is True
+    assert not marker.exists()
+    assert controller.consume_preempt_request() is False

@@ -103,3 +103,10 @@ def test_supervisor_limits_are_bounded():
     assert 10 <= supervisor.STALL_TIMEOUT <= 180
     assert 0 < supervisor.SESSION_LOCK_POLL <= 1
     assert 0 <= supervisor.SESSION_RELEASE_DELAY <= 5
+
+
+def test_session_gate_emits_a_preemption_hint(tmp_path):
+    marker = tmp_path / "state" / "preempt"
+    gate = supervisor.SessionGate(tmp_path / "session.lock", marker)
+    gate.request_preempt()
+    assert marker.is_file()

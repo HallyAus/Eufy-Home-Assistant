@@ -111,6 +111,8 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("start_adaptive_warmer", run_script)
         self.assertIn("adaptive_warm_seconds", run_script)
         self.assertIn("external_consumer_counts", warmer)
+        self.assertIn("EUFY_SESSION_PREEMPT", warmer)
+        self.assertIn("consume_preempt_request", warmer)
         self.assertNotIn("for s in", run_script)
         self.assertNotIn("rtsp://127.0.0.1", run_script)
         self.assertNotIn("create_subprocess", warmer)
