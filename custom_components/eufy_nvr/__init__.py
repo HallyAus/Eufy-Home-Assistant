@@ -46,6 +46,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufyNvrConfigEntry) -> b
 
     entry.runtime_data = coordinator
 
+    # Seed each camera before exposing entities. HA's camera proxy has a fixed
+    # ten-second request ceiling, while this NVR can cold-start only one camera
+    # at a time. Completing the bounded sequential seed here prevents the first
+    # dashboard load from racing the primer and partially returning HTTP 500.
+    await coordinator.async_prime_frames()
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     primer = hass.async_create_task(
         coordinator.async_prime_frames_forever(),

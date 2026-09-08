@@ -119,6 +119,7 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("/api/stream.ts", warmer)
 
     def test_snapshot_primer_is_sequential_and_infrequent(self):
+        setup = (ROOT / "custom_components/eufy_nvr/__init__.py").read_text()
         coordinator = (ROOT / "custom_components/eufy_nvr/coordinator.py").read_text()
         constants = (ROOT / "custom_components/eufy_nvr/const.py").read_text()
         snapshot = (ROOT / "custom_components/eufy_nvr/snapshot.py").read_text()
@@ -131,6 +132,10 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertIn("self._start_refresh(key, capture)", snapshot)
         self.assertIn("current - self._primed_streams", coordinator)
         self.assertIn("retry_delay = min", coordinator)
+        self.assertLess(
+            setup.index("await coordinator.async_prime_frames()"),
+            setup.index("await hass.config_entries.async_forward_entry_setups"),
+        )
 
     def test_token_refresh_does_not_depend_on_keep_warm(self):
         run_script = (ROOT / "eufy_nvr/run.sh").read_text()

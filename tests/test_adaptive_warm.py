@@ -31,6 +31,21 @@ def test_real_viewer_is_preserved_after_subtracting_warmer():
     }
 
 
+def test_snapshot_keyframe_is_not_treated_as_a_live_viewer():
+    streams = {
+        "eufy_front": {
+            "consumers": [
+                {"format_name": "keyframe", "protocol": "http"},
+                {"format_name": "jpeg", "protocol": "http"},
+                {"format_name": "mjpeg", "protocol": "http"},
+            ]
+        }
+    }
+    assert warmer.external_consumer_counts(streams, None, False) == {
+        "eufy_front": 0
+    }
+
+
 def test_current_stream_wins_a_tie_to_avoid_thrashing():
     counts = {"eufy_front": 1, "eufy_shed": 1}
     assert warmer.choose_stream(counts, "eufy_shed") == "eufy_shed"

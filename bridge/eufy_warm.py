@@ -29,6 +29,7 @@ import aiohttp
 POLL_INTERVAL = 0.20
 API_TIMEOUT = 2.0
 RESTART_DELAY = 0.75
+SNAPSHOT_FORMATS = frozenset({"keyframe", "jpeg", "mjpeg"})
 
 
 def log(message: str) -> None:
@@ -45,7 +46,15 @@ def external_consumer_counts(
         if not isinstance(name, str) or not name.startswith("eufy_"):
             continue
         consumers = info.get("consumers") if isinstance(info, dict) else None
-        count = len(consumers) if isinstance(consumers, list) else 0
+        count = 0
+        if isinstance(consumers, list):
+            count = sum(
+                1
+                for consumer in consumers
+                if not isinstance(consumer, dict)
+                or str(consumer.get("format_name", "")).lower()
+                not in SNAPSHOT_FORMATS
+            )
         if warmer_running and name == warm_stream and count:
             count -= 1
         counts[name] = count
