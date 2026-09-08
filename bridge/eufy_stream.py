@@ -10,7 +10,7 @@ Reuses the proven WebRTC transport (see eufy_webrtc.py / notes/04) and adds:
 Auth: captures/eufy_auth.json (webcap/token.js). user_id: captures/user_id.txt (decrypted from auid).
 Run:  python scripts/eufy_stream.py [channel]      (channel 0..3, default 0)
 """
-import asyncio, json, time, uuid, os, sys, hashlib, random, re, base64, struct
+import asyncio, json, time, uuid, os, sys, hashlib, re, base64, struct
 
 import aiohttp
 import websockets
@@ -94,7 +94,9 @@ CAMERAS_JSON = os.environ.get("EUFY_CAMERAS", os.path.join(ROOT, "cameras.json")
 
 STDOUT_MODE = os.environ.get("EUFY_STDOUT") == "1"   # write clean Annex-B to stdout (for go2rtc/ffmpeg exec source)
 def now(): return int(time.time())
-def acct(): return hashlib.md5(str(random.random()).encode()).hexdigest()
+def signaling_account(channel, user_id, timestamp):
+    """Return the account proof used by the current official NVR web client."""
+    return hashlib.md5(f"{channel}{user_id}{timestamp}".encode()).hexdigest()
 def log(*a): print(f"[{time.strftime('%H:%M:%S')}]", *a, flush=True, file=sys.stderr)
 
 def build_openlive(user_id, channels):
@@ -189,22 +191,31 @@ def extract_local_ice(sdp):
     return ufrag, pwd, fp, cands
 
 class Signal:
-    def __init__(self, ws, sid): self.ws = ws; self.sid = sid
-    async def send(self, inner):
-        await self.ws.send(json.dumps({"msgid": str(uuid.uuid4()), "data": json.dumps(inner)}))
+    def __init__(self, ws, sid, auth_token, user_id, channel):
+        self.ws = ws; self.sid = sid; self.auth_token = auth_token
+        self.user_id = user_id; self.channel = channel
+    async def send(self, inner, *, join=False):
+        msgid = "0" if join else f"{self.auth_token}_{uuid.uuid4()}"
+        await self.ws.send(json.dumps({"msgid": msgid, "data": json.dumps(inner)}))
     async def join(self):
-        await self.send({"code": 200, "action": 1, "data": self.sid, "sn": STATION_SN, "source": "WEB", "ts": now()})
+        await self.send({"code": 200, "action": 1, "data": self.sid, "sn": STATION_SN, "source": "WEB", "ts": now()}, join=True)
     async def action3(self, dt, obj):
+        timestamp = now()
+        data = {
+            "timestamp": timestamp,
+            "account": signaling_account(self.channel, self.user_id, timestamp),
+            **obj,
+        }
         await self.send({"code": 200, "action": 3, "sessionId": self.sid, "sn": STATION_SN, "subSn": "",
-                         "channelId": 0, "isResponse": 0, "dataType": dt, "source": "WEB", "ts": now(),
-                         "data": json.dumps(obj)})
-    async def scall(self): await self.action3("scall", {"timestamp": now(), "account": acct()})
-    async def ack(self): await self.action3("ack", {"timestamp": now(), "account": acct()})
+                         "channelId": self.channel, "isResponse": 0, "dataType": dt, "source": "WEB", "ts": timestamp,
+                         "data": json.dumps(data)})
+    async def scall(self): await self.action3("scall", {})
+    async def ack(self): await self.action3("ack", {})
     async def send_sdp(self, uf, pw, fp, setup="active"):
         sdp = {"ice": {"ufrag": uf, "pwd": pw, "fingerprint": fp.upper(), "fingerprint_type": "sha-256"}, "setup": setup}
-        await self.action3("info", {"timestamp": now(), "account": acct(), "sdp": json.dumps(sdp)})
+        await self.action3("info", {"sdp": json.dumps(sdp)})
     async def send_candidate(self, c):
-        await self.action3("info", {"timestamp": now(), "account": acct(), "candidate": c})
+        await self.action3("info", {"candidate": c})
 
 def parse_msg(raw):
     if isinstance(raw, (bytes, bytearray)): raw = raw.decode("utf-8", "replace")
@@ -535,7 +546,7 @@ async def main():
     async with websockets.connect(WS_URL, subprotocols=["v1", subproto],
                                   additional_headers={"Origin": "https://security.eufy.com"},
                                   user_agent_header=UA, max_size=2**22) as ws:
-        sig = Signal(ws, sign_token); log("WSS connected; joining..."); await sig.join()
+        sig = Signal(ws, sign_token, AUTH["authToken"], USER_ID, CHANNELS[0]); log("WSS connected; joining..."); await sig.join()
         answered = [False]; pending = []
         ffmpeg_watchdog_task = None
 
@@ -565,8 +576,11 @@ async def main():
             if action == 1:
                 log("join ack:", d); await sig.scall()
             elif action == 3 and isinstance(d, dict):
-                if "turn" in d:
-                    log("scall/turn status", d.get("status"))
+                if inner.get("dataType") in ("call", "scall") and "status" in d:
+                    status = d.get("status")
+                    log("scall/turn status", status)
+                    if status == 200:
+                        await sig.ack()
                 elif d.get("format") == "SDP":
                     val = d["value"]
                     if isinstance(val, str): val = json.loads(val)
@@ -580,7 +594,7 @@ async def main():
                         ans = await pc.createAnswer(); await pc.setLocalDescription(ans)
                         uf, pw, fp, cands = extract_local_ice(pc.localDescription.sdp)
                         log(f"answer sent; our cands={len(cands)}")
-                        await sig.ack(); await sig.send_sdp(uf, pw, fp, "active")
+                        await sig.send_sdp(uf, pw, fp, "active")
                         for c in cands: await sig.send_candidate(c)
                         for pcand in pending: await add_cand(pcand)
                         pending.clear()

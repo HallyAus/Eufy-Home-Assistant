@@ -52,6 +52,18 @@ def test_live_sessions_are_closed_before_process_teardown():
     assert "if not stop_event.is_set() and SESSION_RELEASE_DELAY" not in supervisor
 
 
+def test_signaling_messages_match_current_official_web_client():
+    stream = (ROOT / "bridge/eufy_stream.py").read_text()
+
+    assert 'hashlib.md5(f"{channel}{user_id}{timestamp}".encode())' in stream
+    assert 'msgid = "0" if join else f"{self.auth_token}_{uuid.uuid4()}"' in stream
+    assert '"channelId": self.channel' in stream
+    assert 'inner.get("dataType") in ("call", "scall")' in stream
+    assert "if status == 200:" in stream
+    assert "await sig.ack()" in stream
+    assert "str(random.random())" not in stream
+
+
 def test_release_versions_and_go2rtc_are_aligned():
     manifest = json.loads((ROOT / "custom_components/eufy_nvr/manifest.json").read_text())
     config = (ROOT / "eufy_nvr/config.yaml").read_text()
