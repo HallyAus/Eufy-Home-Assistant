@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.10
+
+- Preserve the post-`closeLive` appliance teardown grace during normal go2rtc camera handoffs. The graceful
+  signal correctly closed the Eufy session in 0.7.9, but its stop event also skipped the final one-second lock
+  hold, allowing the next queued camera to race the NVR's internal retirement and receive status `486`.
+
 ## 0.7.9
 
 - Configure go2rtc to stop the Eufy supervisor with `SIGINT` and allow a five-second graceful ceiling.
