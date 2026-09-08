@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.5
+
+- Prime one snapshot per camera sequentially after Home Assistant loads the integration, then refresh
+  the fallback set only every 30 minutes. A shared one-hour stale cache lets a first-time multi-camera
+  dashboard return known images while the NVR services cold producers one at a time, instead of timing
+  out later camera requests.
+- Share snapshot coalescing across all camera entities and retain per-camera eviction, preserving the
+  NVR's one-session invariant without coupling unrelated camera lifecycles.
+
 ## 0.7.4
 
 - Serialize access to the NVR's single live WebRTC session across every camera producer and classify

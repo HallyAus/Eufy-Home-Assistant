@@ -243,10 +243,11 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.7.4:** eliminates concurrent-session startup storms with an Eufy-specific one-session gate and adaptive
-last-viewed-camera lease. Home Assistant snapshots now use go2rtc's coalesced JPEG endpoint directly, with a
-30-second fresh cache and bounded stale fallback; `486 busy` responses fail immediately instead of consuming
-the full signaling timeout. Startup work is parallelized and production frame/debug I/O is substantially lower.
+**v0.7.5:** eliminates concurrent-session startup storms with an Eufy-specific one-session gate and adaptive
+last-viewed-camera lease. Home Assistant snapshots use go2rtc's coalesced JPEG endpoint directly; a sequential
+primer seeds every camera so multi-camera dashboards can use a bounded fallback while cold producers take turns.
+`486 busy` responses fail immediately instead of consuming the full signaling timeout. Startup work is
+parallelized and production frame/debug I/O is substantially lower.
 
 **v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,
