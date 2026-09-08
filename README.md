@@ -243,14 +243,15 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.7.11:** eliminates concurrent-session startup storms with an Eufy-specific one-session gate and adaptive
+**v0.7.12:** eliminates concurrent-session startup storms with an Eufy-specific one-session gate and adaptive
 last-viewed-camera lease. Home Assistant snapshots use go2rtc's coalesced JPEG endpoint directly; a sequential
-primer seeds every camera, then stale-while-revalidate makes multi-camera dashboards return immediately while
+primer seeds every camera before its entities are exposed, then stale-while-revalidate makes multi-camera dashboards return immediately while
 cold producers refresh in the background. go2rtc now signals the Eufy supervisor gracefully and allows it to wait
 for the NVR's `closeLive` acknowledgement before WebRTC teardown, then holds the session gate through the
 appliance's retirement grace. This prevents both ghost sessions and next-camera races that return `486 busy`.
 Queued producers also signal the adaptive controller directly, closing go2rtc's visibility gap and preempting a
-different camera's warm lease before the new producer enters signaling.
+different camera's warm lease before the new producer enters signaling. Snapshot-only go2rtc consumers are
+excluded from live-view leases so a thumbnail cannot delay the next camera for 30 seconds.
 
 **v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,

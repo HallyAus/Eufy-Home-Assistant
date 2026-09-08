@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.12
+
+- Prime every camera's bounded fallback image before Home Assistant exposes the camera entities. This removes
+  the startup race where dashboard requests could consume Home Assistant's ten-second proxy deadline while the
+  NVR was still rotating its single hardware session through the sequential primer.
+- Exclude go2rtc's `keyframe`, `jpeg`, and `mjpeg` snapshot consumers from the adaptive live-view lease. A Home
+  Assistant thumbnail refresh now releases the Eufy session promptly instead of looking like a live viewer and
+  retaining the camera for another 30 seconds.
+
 ## 0.7.11
 
 - Add a direct cross-process preemption hint from a queued Eufy producer to the adaptive warm controller.
