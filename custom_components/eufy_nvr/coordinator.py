@@ -25,6 +25,8 @@ from .const import (
     DOMAIN,
     FRAME_CACHE_TTL,
     FRAME_PRIME_INTERVAL,
+    FRAME_PRIME_RETRY_INITIAL,
+    FRAME_PRIME_RETRY_MAX,
     FRAME_STALE_TTL,
     REQUEST_TIMEOUT,
     UPDATE_INTERVAL,
@@ -61,6 +63,7 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             ttl=FRAME_CACHE_TTL,
             stale_ttl=FRAME_STALE_TTL,
         )
+        self._primed_streams: set[str] = set()
 
         super().__init__(
             hass,
@@ -103,22 +106,36 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def discard_frame(self, stream: str) -> None:
         """Discard a removed camera's retained image."""
         self._frame_cache.discard(stream)
+        self._primed_streams.discard(stream)
 
     async def async_prime_frames(self) -> int:
-        """Seed cameras sequentially so a dashboard always has a fallback."""
-        primed = 0
-        for stream in sorted(self.data or {}):
+        """Seed missing cameras sequentially so dashboards have a fallback."""
+        current = set(self.data or {})
+        self._primed_streams.intersection_update(current)
+        for stream in sorted(current - self._primed_streams):
             try:
                 await self.async_get_frame(stream)
             except (Go2RtcError, TimeoutError):
                 _LOGGER.debug("Could not prime snapshot for %s", stream)
             else:
-                primed += 1
-        _LOGGER.debug("Primed %d/%d Eufy camera snapshots", primed, len(self.data or {}))
-        return primed
+                self._primed_streams.add(stream)
+        _LOGGER.debug(
+            "Primed %d/%d Eufy camera snapshots",
+            len(self._primed_streams),
+            len(current),
+        )
+        return len(self._primed_streams)
 
     async def async_prime_frames_forever(self) -> None:
-        """Prime at startup, then refresh infrequently and sequentially."""
+        """Prime at startup, retry missing cameras, then refresh infrequently."""
+        retry_delay = FRAME_PRIME_RETRY_INITIAL
         while True:
-            await self.async_prime_frames()
+            primed = await self.async_prime_frames()
+            total = len(self.data or {})
+            if primed < total:
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, FRAME_PRIME_RETRY_MAX)
+                continue
             await asyncio.sleep(FRAME_PRIME_INTERVAL)
+            self._primed_streams.clear()
+            retry_delay = FRAME_PRIME_RETRY_INITIAL

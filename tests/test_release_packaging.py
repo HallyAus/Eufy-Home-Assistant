@@ -120,10 +120,12 @@ class ReleasePackagingTest(unittest.TestCase):
         coordinator = (ROOT / "custom_components/eufy_nvr/coordinator.py").read_text()
         constants = (ROOT / "custom_components/eufy_nvr/const.py").read_text()
 
-        self.assertIn("for stream in sorted(self.data or {})", coordinator)
+        self.assertIn("for stream in sorted(current - self._primed_streams)", coordinator)
         self.assertNotIn("asyncio.gather", coordinator)
         self.assertIn("FRAME_PRIME_INTERVAL = 30.0 * 60.0", constants)
         self.assertIn("FRAME_STALE_TTL = 60.0 * 60.0", constants)
+        self.assertIn("current - self._primed_streams", coordinator)
+        self.assertIn("retry_delay = min", coordinator)
 
     def test_token_refresh_does_not_depend_on_keep_warm(self):
         run_script = (ROOT / "eufy_nvr/run.sh").read_text()

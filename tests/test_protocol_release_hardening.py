@@ -40,6 +40,7 @@ def test_live_sessions_are_closed_before_process_teardown():
     assert "build_cmd(USER_ID, 1004, {})" in stream
     assert "-> closeLive (1004)" in stream
     assert "await close_live()" in stream
+    assert 'if (\n            DISCOVER\n            or state["close_sent"]' not in stream
     assert "os.kill(proc.pid, signal.SIGINT)" in supervisor
 
 

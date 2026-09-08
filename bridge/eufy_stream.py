@@ -459,11 +459,10 @@ async def main():
             last = cur
 
     async def close_live():
-        """Tell the NVR to retire its live session before closing WebRTC."""
+        """Tell the NVR to retire its control/live session before WebRTC closes."""
         channel = chans.get("WebrtcDataChannel")
         if (
-            DISCOVER
-            or state["close_sent"]
+            state["close_sent"]
             or not state["started"]
             or channel is None
             or channel.readyState != "open"

@@ -41,6 +41,8 @@ REQUEST_TIMEOUT = 10
 FRAME_CACHE_TTL = 30.0
 FRAME_STALE_TTL = 60.0 * 60.0
 FRAME_PRIME_INTERVAL = 30.0 * 60.0
+FRAME_PRIME_RETRY_INITIAL = 10.0
+FRAME_PRIME_RETRY_MAX = 5.0 * 60.0
 
 # DeviceInfo identity for the single "Eufy NVR" hub device the cameras hang off.
 MANUFACTURER = "eufy"
