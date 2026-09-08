@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.9
+
+- Configure go2rtc to stop the Eufy supervisor with `SIGINT` and allow a five-second graceful ceiling.
+  Its default `exec.CommandContext` cancellation killed the wrapper immediately, bypassing `closeLive` and
+  leaving an orphan child WebRTC session that made later cameras receive signaling status `486`.
+- Wait for the NVR's status-0 `closeLive` acknowledgement before closing WebRTC, with a bounded fallback if
+  the acknowledgement is lost.
+- Serve seeded thumbnails stale-while-revalidate: expired dashboard images return immediately while one
+  serialized background refresh updates them. First-ever camera seeds receive a 30-second aggregate window
+  so a four-camera cold burst completes under the NVR's one-camera hardware limit instead of partially 500ing.
+
 ## 0.7.8
 
 - Send `closeLive` after discovery sessions as well as video sessions. The NVR counts the discovery

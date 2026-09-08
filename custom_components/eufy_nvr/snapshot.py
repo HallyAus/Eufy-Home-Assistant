@@ -65,23 +65,16 @@ class SnapshotCache:
         refresh updates it; failures retain the stale image with a brief retry
         cooldown.
         """
+        hit, image = self._cached(key, self._clock(), capture)
+        if hit:
+            return image
+
         async with asyncio.timeout(self._timeout):
             async with self._lock:
                 now = self._clock()
-                for expired in [
-                    k for k, (_, stale_until, _) in self._cache.items()
-                    if stale_until <= now
-                ]:
-                    del self._cache[expired]
-                if key in self._cache:
-                    fresh_until, stale_until, image = self._cache[key]
-                    if fresh_until > now:
-                        self._cache.move_to_end(key)
-                        return image
-                    if image and stale_until > now:
-                        self._cache.move_to_end(key)
-                        self._start_refresh(key, capture)
-                        return image
+                hit, image = self._cached(key, now, capture)
+                if hit:
+                    return image
                 stale = self._cache.get(key)
                 try:
                     image = await capture()
@@ -98,6 +91,31 @@ class SnapshotCache:
                     return stale[2]
                 self._remember(key, image)
                 return image
+
+    def _cached(
+        self,
+        key: Hashable,
+        now: float,
+        capture: Callable[[], Awaitable[bytes | None]],
+    ) -> tuple[bool, bytes | None]:
+        """Read cache state without yielding so stale responses never queue."""
+        for expired in [
+            cache_key
+            for cache_key, (_, stale_until, _) in self._cache.items()
+            if stale_until <= now
+        ]:
+            del self._cache[expired]
+        if key not in self._cache:
+            return False, None
+        fresh_until, stale_until, image = self._cache[key]
+        if fresh_until > now:
+            self._cache.move_to_end(key)
+            return True, image
+        if image and stale_until > now:
+            self._cache.move_to_end(key)
+            self._start_refresh(key, capture)
+            return True, image
+        return False, None
 
     def _start_refresh(
         self, key: Hashable, capture: Callable[[], Awaitable[bytes | None]]

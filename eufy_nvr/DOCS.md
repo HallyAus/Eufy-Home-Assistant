@@ -5,8 +5,8 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** v0.7.8 serializes the NVR's single live session, retains only the
-> last-viewed camera with an adaptive lease, and primes coalesced cached JPEGs sequentially for Home Assistant.
+> **Status: experimental.** v0.7.9 serializes the NVR's single live session, retains only the
+> last-viewed camera with an adaptive lease, and serves seeded Home Assistant thumbnails stale-while-revalidate.
 > It also includes Eufy mailbox/device verification, account-bound auth caches, authenticated LAN access,
 > strict process supervision, and verified immutable build inputs. The
 > HACS integration, **"Eufy NVR (local)"**, auto-creates the camera
@@ -100,13 +100,13 @@ HA), so these ports are opened directly on the host.
   (2s -> 60s cap), recovering faster than a full container bounce and without hammering the NVR.
 - Generated camera and go2rtc state is validated before replacement and written atomically.
 - Concurrent Home Assistant thumbnail requests use go2rtc's authenticated cached-JPEG endpoint and a
-  bounded stale fallback. A low-frequency sequential primer seeds each camera without opening competing
-  producers, avoiding redundant Home Assistant FFmpeg captures and first-dashboard timeout errors.
+  bounded stale-while-revalidate fallback. A low-frequency sequential primer seeds each camera without opening
+  competing producers; later dashboard bursts return immediately while one background refresh runs.
 - A cross-process gate prevents competing cameras from opening simultaneous sessions against the NVR;
-  signaling status `486` is classified immediately instead of waiting for the signaling timeout. A one-second
-  idle kill delay plus a separate one-second teardown grace keeps camera handoffs within HA's image deadline,
-  and the engine sends `closeLive` after discovery and video sessions so the appliance cannot retain a ghost
-  WebRTC control owner.
+  signaling status `486` is classified immediately instead of waiting for the signaling timeout. go2rtc sends
+  `SIGINT` to the Eufy supervisor with a bounded graceful ceiling, and the engine waits for the NVR's status-0
+  `closeLive` acknowledgement after discovery and video sessions so the appliance cannot retain a ghost WebRTC
+  control owner.
 - A Docker `HEALTHCHECK` probes the local go2rtc TCP listener without bypassing API authentication.
 
 ## Troubleshooting
