@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.7
+
+- Send Eufy's `closeLive` command (`cmd 1004`) over the active SCTP/WebRTC control channel before
+  stopping a producer. Previous releases killed the process tree without telling the appliance to
+  retire the live session, which could leave every subsequent camera request returning status `486`.
+- Make supervised shutdown graceful-first: interrupt only the Python protocol engine while keeping
+  its framing oracle and media child alive long enough to transmit `closeLive`, then force-clean the
+  complete process group if it does not exit within the bounded grace period.
+
 ## 0.7.6
 
 - Reduce go2rtc's idle producer kill delay from eight seconds to one. The adaptive warmer already
