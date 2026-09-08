@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.16
+
+- Validate the persisted account-bound token against `ws/sign` before logging in. Container restarts and periodic
+  checks now reuse a live token instead of creating another passport session, avoiding Eufy's daily login cap.
+- Refuse to start producer retry storms when both the cached token and fresh login are rejected. Periodic renewal
+  happens only after the live validation fails.
+
 ## 0.7.15
 
 - Default T8N00 signaling to native `call` and parse/send full SDP offers and answers. Live probes against
