@@ -5,8 +5,9 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** v0.7.2 adds Eufy mailbox/device verification, account-bound auth caches,
-> authenticated LAN access, stricter process supervision, and verified immutable build inputs. The
+> **Status: experimental.** v0.7.3 fixes installation on current Home Assistant Supervisor releases and
+> includes Eufy mailbox/device verification, account-bound auth caches, authenticated LAN access,
+> stricter process supervision, and verified immutable build inputs. The
 > HACS integration, **"Eufy NVR (local)"**, auto-creates the camera
 > entities from the bridge's go2rtc; install it separately from this repo.
 

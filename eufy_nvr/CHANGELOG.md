@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3
+
+- Make the Dockerfile self-contained with a pinned multi-architecture Debian base image. Current Home
+  Assistant Supervisor versions reject digest references in the deprecated `build.yaml` schema and
+  otherwise fall back to Alpine, where the Debian `apt-get` build fails.
+- Remove the deprecated build file and make CI exercise the same Dockerfile default used by Supervisor.
+
 ## 0.7.2
 
 - Implement the current official web mailbox/device-verification flow for `fa_info.step=26052`: request

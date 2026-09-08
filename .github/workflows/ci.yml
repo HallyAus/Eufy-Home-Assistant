@@ -49,6 +49,5 @@ jobs:
       - name: Build amd64 Home Assistant add-on image
         run: |
           docker build \
-            --build-arg BUILD_FROM=ghcr.io/home-assistant/amd64-base-debian:bookworm@sha256:c6a84eec9596b091494a7ba22836090ad56a98a4f73c7b9a9e7590273fc5c5ce \
             --file eufy_nvr/Dockerfile \
             eufy_nvr

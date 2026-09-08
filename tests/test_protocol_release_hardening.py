@@ -2,8 +2,6 @@ import json
 import re
 from pathlib import Path
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -36,8 +34,8 @@ def test_go2rtc_generation_is_restricted_and_tolerates_cold_start():
 def test_release_versions_and_go2rtc_are_aligned():
     manifest = json.loads((ROOT / "custom_components/eufy_nvr/manifest.json").read_text())
     config = (ROOT / "eufy_nvr/config.yaml").read_text()
-    build = yaml.safe_load((ROOT / "eufy_nvr/build.yaml").read_text())
+    dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
     addon_version = re.search(r'^version: "([^"]+)"$', config, re.MULTILINE).group(1)
     assert manifest["version"] == addon_version
     assert tuple(map(int, addon_version.split("."))) >= (0, 7, 0)
-    assert build["args"]["GO2RTC_VERSION"] == "v1.9.14"
+    assert 'ARG GO2RTC_VERSION="v1.9.14"' in dockerfile

@@ -239,9 +239,10 @@ The engine emits **standard RTSP / H.265**, so any of these work with zero extra
 
 ## Status & roadmap
 
-**v0.7.2:** implements Eufy's mailbox/device-verification login used by owner accounts, binds cached auth
-to the exact account, protects go2rtc's LAN API and RTSP video with required credentials, hardens child
-process cleanup and connection timeouts, verifies downloaded runtime assets, and pins release inputs.
+**v0.7.3:** fixes installation on current Home Assistant Supervisor releases with a self-contained,
+multi-architecture Debian build. It also implements Eufy's mailbox/device-verification login used by owner
+accounts, binds cached auth to the exact account, protects go2rtc's LAN API and RTSP video with required
+credentials, hardens child-process cleanup and connection timeouts, and verifies downloaded runtime assets.
 
 **v0.6.0:** a rebuilt companion integration with stricter endpoint validation, actionable empty-stream
 setup errors, stream activity attributes, privacy-safe diagnostics, persistent add-on state, automatic startup,

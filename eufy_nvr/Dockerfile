@@ -1,9 +1,14 @@
-ARG BUILD_FROM
+ARG BUILD_FROM="ghcr.io/home-assistant/base-debian:bookworm@sha256:60cd882d5200157082e568a0b775cca0d9cb5704452ada3cf6f206c4dd6d83c5"
 FROM ${BUILD_FROM}
 
 ARG GO2RTC_VERSION="v1.9.14"
 ARG GO2RTC_SHA256_AMD64="32d616af226bd731678ffde328b94cfb94e30339bfefc469cfb76323144615a6"
 ARG GO2RTC_SHA256_ARM64="359fabade8a7a51e81a55fe6df6b0ef81764a5e1d63179577534eaaa71904b50"
+
+LABEL org.opencontainers.image.title="Eufy NVR Local" \
+    org.opencontainers.image.description="Local eufy S4/T8N00 WebRTC to RTSP bridge for Home Assistant" \
+    org.opencontainers.image.source="https://github.com/HallyAus/Eufy-Home-Assistant" \
+    org.opencontainers.image.licenses="MIT"
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
