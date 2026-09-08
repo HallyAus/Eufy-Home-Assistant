@@ -353,10 +353,11 @@ async def main(argv: list[str] | None = None) -> int:
             )
             return 75
 
-        if discovery and rc == 0:
-            return 0
-
-        if not discovery and rc == 0 and reason == "exit":
+        # A supervised timeout interrupts the child gracefully, so the engine
+        # can return rc=0 even though no SDP/frame/discovery result arrived.
+        # Only an unsolicited normal exit is success. In particular, never let
+        # a stale cameras.json turn a forced discovery timeout into rc=0.
+        if rc == 0 and reason == "exit":
             return 0
 
         if reason == "signaling_timeout":

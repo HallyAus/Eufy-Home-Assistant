@@ -128,7 +128,8 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertNotIn("asyncio.gather", coordinator)
         self.assertIn("FRAME_PRIME_INTERVAL = 30.0 * 60.0", constants)
         self.assertIn("FRAME_STALE_TTL = 60.0 * 60.0", constants)
-        self.assertIn("FRAME_INITIAL_TIMEOUT = 30.0", constants)
+        self.assertIn("FRAME_INITIAL_TIMEOUT = 95.0", constants)
+        self.assertIn("FRAME_SETUP_PRIME_TIMEOUT = 180.0", constants)
         self.assertIn("self._start_refresh(key, capture)", snapshot)
         self.assertIn("current - self._primed_streams", coordinator)
         self.assertIn("retry_delay = min", coordinator)
@@ -136,6 +137,7 @@ class ReleasePackagingTest(unittest.TestCase):
             setup.index("await coordinator.async_prime_frames()"),
             setup.index("await hass.config_entries.async_forward_entry_setups"),
         )
+        self.assertIn("asyncio.timeout(FRAME_SETUP_PRIME_TIMEOUT)", setup)
 
     def test_token_refresh_does_not_depend_on_keep_warm(self):
         run_script = (ROOT / "eufy_nvr/run.sh").read_text()

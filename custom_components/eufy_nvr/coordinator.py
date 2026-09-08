@@ -98,7 +98,12 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Fetch or reuse one coalesced snapshot for a camera."""
 
         async def capture() -> bytes:
-            return await self._client.async_get_frame(stream)
+            # The first seed is not constrained by HA's ten-second camera proxy
+            # deadline. It must outlive go2rtc's complete, supervised Eufy retry
+            # window; later dashboard requests normally hit fresh/stale cache.
+            return await self._client.async_get_frame(
+                stream, timeout=FRAME_INITIAL_TIMEOUT - 1.0
+            )
 
         frame = await self._frame_cache.async_get(stream, capture)
         if frame is None:

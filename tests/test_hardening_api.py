@@ -101,12 +101,21 @@ async def test_client_fetches_one_cached_full_size_jpeg():
         session, "bridge.local", 1985, 10, "eufy", "0123456789abcdef"
     )
 
-    assert await instance.async_get_frame("eufy_front_gate") == jpeg
+    assert await instance.async_get_frame("eufy_front_gate", timeout=94) == jpeg
     args, kwargs = session.request
     assert args == ("http://bridge.local:1985/api/frame.jpeg",)
     assert kwargs["params"] == {"src": "eufy_front_gate", "cache": "30s"}
+    assert kwargs["timeout"] == 94
     assert "width" not in kwargs["params"]
     assert kwargs["headers"]["Authorization"].startswith("Basic ")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout", [0, -1, 301, "slow", True])
+async def test_client_rejects_invalid_snapshot_timeout(timeout):
+    instance = client(Response(body=b"\xff\xd8image\xff\xd9", content_type="image/jpeg"))
+    with pytest.raises(api.Go2RtcPayloadError):
+        await instance.async_get_frame("eufy_front_gate", timeout=timeout)
 
 
 @pytest.mark.asyncio

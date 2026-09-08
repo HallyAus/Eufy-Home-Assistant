@@ -9,16 +9,20 @@ bridge publishes them — there is nothing to configure per camera.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN
+from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN, FRAME_SETUP_PRIME_TIMEOUT
 from .coordinator import EufyNvrCoordinator
 from .go2rtc_api import validate_credentials
 
 PLATFORMS: list[Platform] = [Platform.CAMERA]
+_LOGGER = logging.getLogger(__name__)
 
 # Typed config entry so ``entry.runtime_data`` carries the coordinator (HA 2024.11+).
 type EufyNvrConfigEntry = ConfigEntry[EufyNvrCoordinator]
@@ -50,7 +54,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufyNvrConfigEntry) -> b
     # ten-second request ceiling, while this NVR can cold-start only one camera
     # at a time. Completing the bounded sequential seed here prevents the first
     # dashboard load from racing the primer and partially returning HTTP 500.
-    await coordinator.async_prime_frames()
+    try:
+        async with asyncio.timeout(FRAME_SETUP_PRIME_TIMEOUT):
+            await coordinator.async_prime_frames()
+    except TimeoutError:
+        # Do not hold the entire integration unavailable forever during a Eufy
+        # signaling outage. The background primer retains successful seeds and
+        # retries only the missing cameras with exponential backoff.
+        _LOGGER.warning(
+            "Eufy snapshot startup primer exceeded %.0f seconds; exposing "
+            "camera entities and retrying missing seeds in the background",
+            FRAME_SETUP_PRIME_TIMEOUT,
+        )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     primer = hass.async_create_task(

@@ -18,7 +18,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent
 STREAM_NAME = re.compile(r"eufy_[a-z0-9_]+\Z")
-STREAM_START_TIMEOUT = int(os.environ.get("EUFY_STREAM_START_TIMEOUT", "60"))
+STREAM_START_TIMEOUT = int(os.environ.get("EUFY_STREAM_START_TIMEOUT", "90"))
 
 
 def slug(name: str | None, channel: int) -> str:

@@ -14,10 +14,13 @@ def test_oracle_classifies_minus_104_and_stops_parent():
 
 def test_addon_classifies_authorization_and_supervised_signaling_failures():
     source = (ROOT / "eufy_nvr/run.sh").read_text()
+    supervisor = (ROOT / "bridge/eufy_run.py").read_text()
     assert "EUFY_AUTHORIZATION_ERROR_-104" in source
     assert "Shared/member accounts" in source
     assert "signaling timed out" in source
     assert "supervised signaling retries" in source
+    assert "if discovery and rc == 0" not in supervisor
+    assert 'rc == 0 and reason == "exit"' in supervisor
     assert "attempt * 5" in source
 
 

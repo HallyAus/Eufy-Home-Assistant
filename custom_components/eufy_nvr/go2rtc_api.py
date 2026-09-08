@@ -252,7 +252,9 @@ class Go2RtcClient:
                 f"unexpected go2rtc response from {self.url}"
             ) from err
 
-    async def async_get_frame(self, stream: str) -> bytes:
+    async def async_get_frame(
+        self, stream: str, *, timeout: float | None = None
+    ) -> bytes:
         """Fetch a cached JPEG directly from go2rtc.
 
         Width and height are deliberately omitted: go2rtc 1.9.14 keys its JPEG
@@ -263,11 +265,14 @@ class Go2RtcClient:
 
         if not isinstance(stream, str) or not stream.startswith(STREAM_PREFIX):
             raise Go2RtcPayloadError("invalid Eufy stream name")
+        request_timeout = min(self._timeout, 9) if timeout is None else timeout
+        if type(request_timeout) not in (int, float) or not 0 < request_timeout <= 300:
+            raise Go2RtcPayloadError("invalid snapshot timeout")
         try:
             async with self._session.get(
                 self.frame_url,
                 params={"src": stream, "cache": "30s"},
-                timeout=min(self._timeout, 9),
+                timeout=request_timeout,
                 headers=self._headers,
             ) as response:
                 response.raise_for_status()
