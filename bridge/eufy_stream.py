@@ -64,6 +64,9 @@ USER_ID = _decrypt_user_id()
 DISCOVER = "--discover" in sys.argv   # connect, run cmd 9100 -> list NVR ip + cameras (ch,name), write cameras.json, exit
 _carg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "0"
 CHANNELS = [0, 1, 2, 3] if _carg == "all" else [int(x) for x in _carg.split(",")]
+CALL_TYPE = os.environ.get("EUFY_CALL_TYPE", "call").strip().lower()
+if CALL_TYPE not in ("call", "scall"):
+    raise SystemExit("EUFY_CALL_TYPE must be 'call' or 'scall'")
 # --rtsp <url>: publish the H.265 stream to that RTSP url via ffmpeg (go2rtc exec {output} mode).
 RTSP_URL = None
 if "--rtsp" in sys.argv:
@@ -191,9 +194,9 @@ def extract_local_ice(sdp):
     return ufrag, pwd, fp, cands
 
 class Signal:
-    def __init__(self, ws, sid, auth_token, user_id, channel):
+    def __init__(self, ws, sid, auth_token, user_id, channel, call_type):
         self.ws = ws; self.sid = sid; self.auth_token = auth_token
-        self.user_id = user_id; self.channel = channel
+        self.user_id = user_id; self.channel = channel; self.call_type = call_type
     async def send(self, inner, *, join=False):
         msgid = "0" if join else f"{self.auth_token}_{uuid.uuid4()}"
         await self.ws.send(json.dumps({"msgid": msgid, "data": json.dumps(inner)}))
@@ -209,11 +212,16 @@ class Signal:
         await self.send({"code": 200, "action": 3, "sessionId": self.sid, "sn": STATION_SN, "subSn": "",
                          "channelId": self.channel, "isResponse": 0, "dataType": dt, "source": "WEB", "ts": timestamp,
                          "data": json.dumps(data)})
-    async def scall(self): await self.action3("scall", {})
+    async def call(self): await self.action3(self.call_type, {})
     async def ack(self): await self.action3("ack", {})
-    async def send_sdp(self, uf, pw, fp, setup="active"):
-        sdp = {"ice": {"ufrag": uf, "pwd": pw, "fingerprint": fp.upper(), "fingerprint_type": "sha-256"}, "setup": setup}
-        await self.action3("info", {"sdp": json.dumps(sdp)})
+    async def send_sdp(self, native_sdp, uf, pw, fp, setup="active"):
+        if self.call_type == "scall":
+            compact = {"ice": {"ufrag": uf, "pwd": pw, "fingerprint": fp.upper(),
+                               "fingerprint_type": "sha-256"}, "setup": setup}
+            value = json.dumps(compact)
+        else:
+            value = native_sdp
+        await self.action3("info", {"sdp": value})
     async def send_candidate(self, c):
         await self.action3("info", {"candidate": c})
 
@@ -300,7 +308,7 @@ async def main():
     log("sign token acquired; channels", CHANNELS)
     log(f"PERF bootstrap_ms={int((time.monotonic() - perf_started) * 1000)}")
 
-    sub = {"region": AUTH.get("webCountry", "US"), "type": "NVR", "sn": STATION_SN,
+    sub = {"region": ec.signaling_region(REGION), "type": "NVR", "sn": STATION_SN,
            "token": AUTH["authToken"], "gtoken": AUTH["gtoken"], "sign": sign_token,
            "appName": AUTH.get("appName", "eufy_mega"), "modelType": "WEB"}
     subproto = base64.urlsafe_b64encode(json.dumps(sub, separators=(",", ":")).encode()).decode().rstrip("=")
@@ -546,7 +554,8 @@ async def main():
     async with websockets.connect(WS_URL, subprotocols=["v1", subproto],
                                   additional_headers={"Origin": "https://security.eufy.com"},
                                   user_agent_header=UA, max_size=2**22) as ws:
-        sig = Signal(ws, sign_token, AUTH["authToken"], USER_ID, CHANNELS[0]); log("WSS connected; joining..."); await sig.join()
+        sig = Signal(ws, sign_token, AUTH["authToken"], USER_ID, CHANNELS[0], CALL_TYPE)
+        log(f"WSS connected; joining with {CALL_TYPE} signaling..."); await sig.join()
         answered = [False]; pending = []
         ffmpeg_watchdog_task = None
 
@@ -574,27 +583,44 @@ async def main():
             if not isinstance(inner, dict): return
             action = inner.get("action")
             if action == 1:
-                log("join ack:", d); await sig.scall()
+                log("join ack:", d); await sig.call()
             elif action == 3 and isinstance(d, dict):
                 if inner.get("dataType") in ("call", "scall") and "status" in d:
                     status = d.get("status")
-                    log("scall/turn status", status)
+                    log("scall/turn status", status, f"mode={sig.call_type}")
                     if status == 200:
                         await sig.ack()
                 elif d.get("format") == "SDP":
                     val = d["value"]
-                    if isinstance(val, str): val = json.loads(val)
-                    log("NVR SDP offer received")
+                    compact = None
+                    if isinstance(val, str):
+                        try:
+                            compact = json.loads(val)
+                        except json.JSONDecodeError:
+                            pass
+                    elif isinstance(val, dict):
+                        compact = val
+                    if isinstance(compact, dict) and isinstance(compact.get("ice"), dict):
+                        offer = build_offer_sdp(compact["ice"], compact.get("setup", "actpass"))
+                        offer_mode = "compact"
+                    elif isinstance(val, str) and val.lstrip().startswith("v=0"):
+                        offer = val
+                        offer_mode = "native"
+                    else:
+                        state["fatal_reason"] = "invalid SDP offer"
+                        log("invalid SDP offer received")
+                        await ws.close()
+                        return
+                    log(f"NVR SDP offer received ({offer_mode})")
                     if not answered[0]:
                         answered[0] = True
-                        offer = build_offer_sdp(val["ice"], val.get("setup", "actpass"))
                         await pc.setRemoteDescription(RTCSessionDescription(sdp=offer, type="offer"))
                         for lbl in ["WebrtcDataChannel", "audio", "idr", "video", "notify", "download"]:
                             chans[lbl] = pc.createDataChannel(lbl); attach(chans[lbl], True)
                         ans = await pc.createAnswer(); await pc.setLocalDescription(ans)
                         uf, pw, fp, cands = extract_local_ice(pc.localDescription.sdp)
                         log(f"answer sent; our cands={len(cands)}")
-                        await sig.send_sdp(uf, pw, fp, "active")
+                        await sig.send_sdp(pc.localDescription.sdp, uf, pw, fp, "active")
                         for c in cands: await sig.send_candidate(c)
                         for pcand in pending: await add_cand(pcand)
                         pending.clear()

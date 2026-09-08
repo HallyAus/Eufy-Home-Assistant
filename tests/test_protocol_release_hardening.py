@@ -58,10 +58,27 @@ def test_signaling_messages_match_current_official_web_client():
     assert 'hashlib.md5(f"{channel}{user_id}{timestamp}".encode())' in stream
     assert 'msgid = "0" if join else f"{self.auth_token}_{uuid.uuid4()}"' in stream
     assert '"channelId": self.channel' in stream
+    assert '"region": ec.signaling_region(REGION)' in stream
+    assert 'CALL_TYPE = os.environ.get("EUFY_CALL_TYPE", "call")' in stream
+    assert 'await self.action3(self.call_type, {})' in stream
     assert 'inner.get("dataType") in ("call", "scall")' in stream
     assert "if status == 200:" in stream
     assert "await sig.ack()" in stream
     assert "str(random.random())" not in stream
+
+
+def test_native_and_compact_sdp_modes_are_both_supported():
+    stream = (ROOT / "bridge/eufy_stream.py").read_text()
+
+    assert 'self.call_type == "scall"' in stream
+    assert 'val.lstrip().startswith("v=0")' in stream
+    assert 'offer_mode = "native"' in stream
+    assert 'sig.send_sdp(pc.localDescription.sdp' in stream
+
+    run_script = (ROOT / "eufy_nvr/run.sh").read_text()
+    config = (ROOT / "eufy_nvr/config.yaml").read_text()
+    assert 'EUFY_CALL_TYPE="$(bashio::config \'signaling_mode\' \'call\')"' in run_script
+    assert 'signaling_mode: list(call|scall)?' in config
 
 
 def test_release_versions_and_go2rtc_are_aligned():

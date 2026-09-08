@@ -172,10 +172,32 @@ def normalize_region(region: str) -> str:
     return normalized
 
 
+def resolve_region(service: str, region: str) -> str:
+    """Return the region key actually selected for a cloud service."""
+    table = DOMAINS.get(service, {})
+    normalized = normalize_region(region)
+    if normalized in table:
+        return normalized
+    if "us-pr" in table:
+        return "us-pr"
+    return normalized
+
+
+def signaling_region(region: str) -> str:
+    """Return the service region sent in the WebSocket subprotocol.
+
+    The official client sends the selected smart-service region
+    (``US``/``EU``/``IE``), not the account's web-country code. Supplying a
+    country such as ``AU`` can join the signaling room but leaves the NVR call
+    pending at status 100.
+    """
+    return resolve_region("smart", region).split("-", 1)[0].upper()
+
+
 def base_url(service: str, region: str) -> str:
     """fa(service, region) -- region->domain lookup with us-pr fallback."""
     table = DOMAINS.get(service, {})
-    return table.get(normalize_region(region)) or table.get("us-pr") or ""
+    return table.get(resolve_region(service, region)) or ""
 
 
 def smart_urls(station_sn: str, region: str) -> Tuple[str, str]:
@@ -958,7 +980,7 @@ class EufyVerificationRequired(EufyCloudError):
 
 __all__ = [
     "DOMAINS", "APP_NAME", "EXCHANGE_BOOTSTRAP_KEY",
-    "normalize_region", "base_url", "smart_urls",
+    "normalize_region", "resolve_region", "signaling_region", "base_url", "smart_urls",
     "gen_keypair", "derive_share_key", "sign",
     "aes_encrypt", "aes_decrypt", "KeyExchange", "RandomField",
     "ecdh_handshake", "encrypted_post",

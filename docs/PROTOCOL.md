@@ -24,11 +24,18 @@ header: `v1, base64url({region,type:"NVR",sn,token,gtoken,sign,appName,modelType
 Every frame: `{"msgid": "<auth-token>_<request-id>", "data": "<stringified inner JSON>"}` (the join
 uses message ID `0`). Action-3 messages bind the request to the logged-in NVR administrator with
 `account = MD5(channel_id + admin_user_id + unix_timestamp)`. Handshake:
+
+The subprotocol's `region` is the selected smart-service region (`US`, `EU`, or `IE`), not the
+account country. For example, an Australian account routed through `us-pr` sends `US`, not `AU`.
+
 1. C→S `action:1` join with `data:<sessionToken>`
 2. S→C `action:1 isResponse:1 {status:200}`
-3. C→S `action:3 dataType:"scall"` → S→C returns `turn:{...}` (relay creds; unused for LAN-direct)
-   with status 100, then status 200; acknowledge status 200 immediately with `dataType:"ack"`.
-4. S→C `action:3 dataType:"info" source:"DEVICE"` = compact SDP offer `{ice:{ufrag,pwd,fingerprint}, setup:"actpass"}`
+3. C→S `action:3 dataType:"call"` → S→C returns `turn:{...}` (relay creds; unused for LAN-direct)
+   with status 100, then status 200; acknowledge status 200 immediately with `dataType:"ack"`. The engine also
+   accepts Eufy's newer `scall` mode when selected explicitly, but defaults to native `call` because deployed
+   T8N00 firmware can advertise online and then time out every compact call with status 408.
+4. S→C `action:3 dataType:"info" source:"DEVICE"` = native SDP offer. In explicit `scall` mode this is the
+   compact form `{ice:{ufrag,pwd,fingerprint}, setup:"actpass"}`; both are parsed.
 5. S→C trickle `CANDIDATE`s (host `192.168.1.152`, `192.168.32.2`, srflx, relay). **The host candidate can arrive
    *before* the offer — buffer candidates until the remote description is set, or the LAN pair is lost.**
 6. C→S `ack`, then `info` with our compact SDP (`setup:"active"`) + our host candidate.

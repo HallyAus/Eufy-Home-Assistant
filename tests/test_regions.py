@@ -14,6 +14,12 @@ class RegionEndpointsTest(unittest.TestCase):
         self.assertEqual(ec.normalize_region(" eu "), "eu-pr")
         self.assertEqual(ec.normalize_region("ie-pr"), "ie-pr")
 
+    def test_signaling_uses_service_region_not_web_country(self):
+        self.assertEqual(ec.signaling_region("US"), "US")
+        self.assertEqual(ec.signaling_region("EU"), "EU")
+        self.assertEqual(ec.signaling_region("IE"), "IE")
+        self.assertEqual(ec.signaling_region("unknown"), "US")
+
     def test_selects_each_smart_service_host(self):
         expected_hosts = {
             "US": "security-smart.eufylife.com",

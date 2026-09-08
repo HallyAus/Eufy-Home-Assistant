@@ -63,6 +63,7 @@ options:
   password: ""
   region: "US"
   country: ""
+  signaling_mode: "call"
   log_level: "info"
   keep_warm: false
   adaptive_warm_seconds: 30
@@ -76,6 +77,8 @@ schema:
   password: password
   region: list(US|EU|IE)?
   country: str?
+  # Native call is required by T8N00 firmware that times out the newer compact scall mode.
+  signaling_mode: list(call|scall)?
   log_level: list(trace|debug|info|notice|warning|error|fatal)?
   # keep_warm: deprecated compatibility switch. When true, retains only the last-viewed camera
   #   for 300 seconds; it never starts one permanent producer per camera.

@@ -29,6 +29,7 @@ fi
 export EUFY_EMAIL="$(bashio::config 'email')"
 export EUFY_PASSWORD="$(bashio::config 'password')"
 export EUFY_REGION="$(bashio::config 'region' 'US')"
+export EUFY_CALL_TYPE="$(bashio::config 'signaling_mode' 'call')"
 export EUFY_AUTH="${STATE_DIR}/auth.json"
 export EUFY_CAMERAS="${STATE_DIR}/cameras.json"
 export EUFY_STREAM_NAMES="${STATE_DIR}/stream_names.json"

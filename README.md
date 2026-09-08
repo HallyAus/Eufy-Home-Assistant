@@ -125,6 +125,7 @@ Runs everything on your HA host; no always-on PC and no token paste.
 3. **Configuration** tab → enter your eufy account:
    - `email` / `password` — your eufy login
    - `region` — `US`, `EU`, or `IE` (the eufy server region that holds your account)
+   - `signaling_mode` — keep the default `call`; deployed T8N00 firmware can time out `scall`
    - `log_level` — `info` (raise to `debug` only when troubleshooting)
    - `go2rtc_username` / `go2rtc_password` — local credentials (password: at least 16 characters) that
      protect the camera API, web UI, and RTSP streams; enter the same values in the companion integration

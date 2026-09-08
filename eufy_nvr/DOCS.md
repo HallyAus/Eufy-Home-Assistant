@@ -32,6 +32,7 @@ cloud; the video itself is pulled LAN-direct from the NVR.
    - `password`  -> your eufy account password
    - `region`    -> `US`, `EU`, or `IE` (the eufy server region holding the account)
    - `country`   -> optional real account country such as `AU` or `GB`; leave blank to use `region`
+   - `signaling_mode` -> `call` (the compatible T8N00 native-SDP mode; use `scall` only for diagnostics)
    - `log_level` -> `info` (raise to `debug` only when troubleshooting)
    - `go2rtc_username` / `go2rtc_password` -> required local credentials shared with the companion
      integration; use a password of at least 16 characters
@@ -125,9 +126,9 @@ HA), so these ports are opened directly on the host.
   trigger a temporary lockout.
 - **"Discovery failed" / streams never start** — confirm `region` matches your account (US/EU/IE). If
   auto-discovery can't find the NVR, set `station_sn` to your NVR's serial explicitly.
-- **`scall/turn status 100` with no later status 200 or SDP offer** — this is an unresolved signalling
-  failure tracked in GitHub issue #6. Capture the add-on log at `debug`; do not assume changing the
-  account type will fix it, because it has been reproduced with both owner and member accounts.
+- **`scall/turn status 100` with no later status 200 or SDP offer** — leave `signaling_mode` at its
+  default `call`. Some deployed T8N00 firmware advertises online but returns status `408` for compact
+  `scall`; native `call` returns status `200` and a full SDP offer immediately.
 - **go2rtc `exec: timeout` / discovery works but live video does not** — v0.7 uses go2rtc 1.9.14 and a
   longer producer startup window. If it still fails, capture the per-camera `eufy_stream.py` signalling
   lines; the remaining fault is inside the live-session handshake rather than camera discovery.
