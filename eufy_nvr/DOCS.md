@@ -5,7 +5,7 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** v0.7.7 serializes the NVR's single live session, retains only the
+> **Status: experimental.** v0.7.8 serializes the NVR's single live session, retains only the
 > last-viewed camera with an adaptive lease, and primes coalesced cached JPEGs sequentially for Home Assistant.
 > It also includes Eufy mailbox/device verification, account-bound auth caches, authenticated LAN access,
 > strict process supervision, and verified immutable build inputs. The
@@ -105,7 +105,8 @@ HA), so these ports are opened directly on the host.
 - A cross-process gate prevents competing cameras from opening simultaneous sessions against the NVR;
   signaling status `486` is classified immediately instead of waiting for the signaling timeout. A one-second
   idle kill delay plus a separate one-second teardown grace keeps camera handoffs within HA's image deadline,
-  and the engine sends `closeLive` before teardown so the appliance cannot retain a ghost session.
+  and the engine sends `closeLive` after discovery and video sessions so the appliance cannot retain a ghost
+  WebRTC control owner.
 - A Docker `HEALTHCHECK` probes the local go2rtc TCP listener without bypassing API authentication.
 
 ## Troubleshooting

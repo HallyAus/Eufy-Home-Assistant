@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.8
+
+- Send `closeLive` after discovery sessions as well as video sessions. The NVR counts the discovery
+  WebRTC control connection against the same one-session limit, so merely closing the peer connection
+  could make every later producer receive signaling status `486` despite no active local consumer.
+- Retry only cameras that still lack a primed snapshot, using bounded exponential backoff. A partial
+  startup cycle no longer waits 30 minutes before trying the missing camera fallbacks again or repeats
+  successful camera work during the retry window.
+
 ## 0.7.7
 
 - Send Eufy's `closeLive` command (`cmd 1004`) over the active SCTP/WebRTC control channel before
