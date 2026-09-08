@@ -5,7 +5,7 @@ separate always-on PC. It auto-discovers your NVR's cameras and serves them as R
 bundled, pinned go2rtc. No cloud media, no Frigate — only the signaling handshake touches eufy's
 cloud; the video itself is pulled LAN-direct from the NVR.
 
-> **Status: experimental.** v0.7.12 serializes the NVR's single live session, retains only the
+> **Status: experimental.** v0.7.13 serializes the NVR's single live session, retains only the
 > last-viewed live camera with an adaptive lease, and serves pre-seeded Home Assistant thumbnails stale-while-revalidate.
 > It also includes Eufy mailbox/device verification, account-bound auth caches, authenticated LAN access,
 > strict process supervision, and verified immutable build inputs. The
@@ -71,7 +71,7 @@ log and shown in the go2rtc UI. To surface them as camera entities, either:
 
 Streams are **on-demand**: the engine only connects to the NVR while something is actually pulling a
 stream, so the single live session is freed when nobody is watching. go2rtc 1.9.14 is configured with
-a 60-second exec `starttimeout` so slow Eufy WebRTC cold starts are not killed prematurely. An
+a 90-second exec `starttimeout` so queued or retrying Eufy WebRTC cold starts are not killed prematurely. An
 Eufy-specific controller holds only the most recently viewed producer for a short adaptive lease and
 hands the single NVR session to a newly requested camera.
 

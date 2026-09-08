@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.13
+
+- Align Home Assistant's initial snapshot request with the complete supervised Eufy retry window. The primer no
+  longer cancels after nine seconds and immediately queues another producer while go2rtc is still waiting for the
+  NVR. A 95-second per-camera ceiling and 180-second aggregate setup budget allow recovery without blocking HA
+  indefinitely during an Eufy signaling outage.
+- Extend go2rtc's producer startup ceiling to 90 seconds so time spent waiting for the NVR's one-session gate does
+  not consume the retry attempt before signaling begins.
+- Reject graceful child exit as discovery success when the supervisor itself ended a stalled TURN session. A
+  cached `cameras.json` can no longer hide a failed fresh discovery.
+
 ## 0.7.12
 
 - Prime every camera's bounded fallback image before Home Assistant exposes the camera entities. This removes
