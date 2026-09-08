@@ -45,6 +45,8 @@ def test_live_sessions_are_closed_before_process_teardown():
     assert 'if (\n            DISCOVER\n            or state["close_sent"]' not in stream
     assert "os.kill(proc.pid, signal.SIGINT)" in supervisor
     assert "timeout=3.0" in supervisor
+    assert "await asyncio.sleep(SESSION_RELEASE_DELAY)" in supervisor
+    assert "if not stop_event.is_set() and SESSION_RELEASE_DELAY" not in supervisor
 
 
 def test_release_versions_and_go2rtc_are_aligned():

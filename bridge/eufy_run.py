@@ -294,14 +294,11 @@ async def main(argv: list[str] | None = None) -> int:
             # go2rtc has already removed the last consumer when the engine exits,
             # but the appliance needs a brief beat to retire its WebRTC session.
             # Holding the lock during that beat prevents the next camera from
-            # racing the NVR's internal teardown and receiving status 486.
-            if not stop_event.is_set() and SESSION_RELEASE_DELAY:
-                try:
-                    await asyncio.wait_for(
-                        stop_event.wait(), timeout=SESSION_RELEASE_DELAY
-                    )
-                except asyncio.TimeoutError:
-                    pass
+            # racing the NVR's internal teardown and receiving status 486. This
+            # delay is required when go2rtc sets the stop event for a normal
+            # camera handoff, not only when the engine exits on its own.
+            if SESSION_RELEASE_DELAY:
+                await asyncio.sleep(SESSION_RELEASE_DELAY)
             gate.release()
 
         if reason == "shutdown":
