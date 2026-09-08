@@ -54,6 +54,10 @@ ports_description:
 #   station_sn     -- optional: set if auto-discovery can't find the NVR serial.
 #   captcha_id / captcha_answer -- optional: only if a login is challenged with a graphic
 #                     captcha (the log prints the captcha_id; solve it and set both, restart).
+#   verification_code -- optional one-time six-digit email code. On a device-verification
+#                     challenge, the first start requests the code; enter it and restart.
+#   go2rtc_username / go2rtc_password -- REQUIRED local credentials shared with the HACS
+#                     integration. They protect the API, web UI, RTSP, and camera video.
 options:
   email: ""
   password: ""
@@ -63,6 +67,9 @@ options:
   keep_warm: false
   token_refresh_hours: 6
   video_copy: false
+  verification_code: ""
+  go2rtc_username: "eufy"
+  go2rtc_password: ""
 schema:
   email: str
   password: password
@@ -81,3 +88,6 @@ schema:
   station_sn: str?
   captcha_id: str?
   captcha_answer: str?
+  verification_code: password?
+  go2rtc_username: str
+  go2rtc_password: password

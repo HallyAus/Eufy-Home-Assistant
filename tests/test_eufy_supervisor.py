@@ -46,10 +46,10 @@ def test_video_progress_tracks_first_and_latest_frame():
     assert current.last_video_at >= first
 
 
-def test_discovery_fixed_status_reply_is_classified_as_authorization_failure():
+def test_explicit_oracle_status_is_classified_as_authorization_failure():
     current = state()
     supervisor.inspect_log_line(
-        "[12:00:00] CTRL cmd=1350 link=1 len=148 ����",
+        "[12:00:00] oracle[stderr]: EUFY_AUTHORIZATION_ERROR_-104: owner required",
         current,
         True,
     )
@@ -76,7 +76,7 @@ def test_json_control_reply_is_not_classified_as_authorization_failure():
     assert current.authorization_rejection is False
 
 
-def test_live_fixed_reply_does_not_trigger_discovery_authorization_classifier():
+def test_ambiguous_live_reply_is_not_guessed_to_be_authorization_failure():
     current = state()
     supervisor.inspect_log_line(
         "[12:00:00] CTRL cmd=1350 link=1 len=148 ����",
@@ -90,4 +90,5 @@ def test_supervisor_limits_are_bounded():
     assert 1 <= supervisor.MAX_ATTEMPTS <= 6
     assert 10 <= supervisor.SIGNAL_TIMEOUT <= 120
     assert 15 <= supervisor.FIRST_FRAME_TIMEOUT <= 180
+    assert 10 <= supervisor.CONNECTION_TIMEOUT <= 180
     assert 10 <= supervisor.STALL_TIMEOUT <= 180

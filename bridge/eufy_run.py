@@ -5,7 +5,7 @@ The reversed protocol engine remains in eufy_stream.py. This wrapper owns its
 process tree and adds bounded recovery around the failure modes seen in the field:
 
 * signaling stuck at scall/TURN status 100 with no SDP offer (#6)
-* discovery rejected by the NVR with a fixed 132-byte authorization reply (#8)
+* an explicit NVR authorization rejection reported by the framing oracle (#8)
 * a live producer that never produces its first video frame, or later stalls (#5)
 
 All child stderr is relayed unchanged so existing diagnostics remain useful.
@@ -26,6 +26,7 @@ ENGINE = ROOT / "eufy_stream.py"
 MAX_ATTEMPTS = max(1, min(int(os.environ.get("EUFY_SESSION_ATTEMPTS", "3")), 6))
 SIGNAL_TIMEOUT = max(10, min(int(os.environ.get("EUFY_SIGNAL_TIMEOUT", "25")), 120))
 FIRST_FRAME_TIMEOUT = max(15, min(int(os.environ.get("EUFY_FIRST_FRAME_TIMEOUT", "50")), 180))
+CONNECTION_TIMEOUT = max(10, min(int(os.environ.get("EUFY_CONNECTION_TIMEOUT", "35")), 180))
 STALL_TIMEOUT = max(10, min(int(os.environ.get("EUFY_STALL_TIMEOUT", "25")), 180))
 
 
@@ -62,26 +63,14 @@ def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
         state.last_video_at = now
         state.last_progress = now
 
-    # During --discover the only application command is getDeviceList (9100). A
-    # shared/member account returns the issue-#8 shape: 16-byte XZYH header plus a
-    # fixed 132-byte non-JSON status payload. A successful status-0 acknowledgement
-    # can have the same 148-byte length but decodes to an empty string; -104 begins
-    # with invalid UTF-8 bytes and therefore contains replacement characters after
-    # eufy_stream's decode(..., "replace"). Require that marker to avoid rejecting
-    # a successful owner/admin account before its subsequent dev_list JSON arrives.
-    if (
-        discovery
-        and "CTRL cmd=1350" in line
-        and "len=148" in line
-        and "\ufffd" in line
-        and "dev_list" not in line
-        and "{" not in line
-    ):
+    # sctp_oracle.js decodes the binary status and emits this exact marker for
+    # -104. Never infer authorization from payload length or replacement bytes.
+    if "EUFY_AUTHORIZATION_ERROR_-104" in line:
         state.authorization_rejection = True
 
 
 async def _terminate_tree(proc: asyncio.subprocess.Process) -> None:
-    if proc.returncode is not None:
+    if os.name == "nt" and proc.returncode is not None:
         return
     try:
         if os.name != "nt":
@@ -89,12 +78,22 @@ async def _terminate_tree(proc: asyncio.subprocess.Process) -> None:
         else:
             proc.terminate()
     except ProcessLookupError:
-        return
-    try:
-        await asyncio.wait_for(proc.wait(), timeout=5)
-        return
-    except asyncio.TimeoutError:
         pass
+    if proc.returncode is None:
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
+    if os.name != "nt":
+        # The session leader can exit before ffmpeg/oracle children. Wait for the
+        # process group itself, then kill any descendants that ignored SIGTERM.
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            try:
+                os.killpg(proc.pid, 0)
+            except ProcessLookupError:
+                return
+            await asyncio.sleep(0.1)
     try:
         if os.name != "nt":
             os.killpg(proc.pid, signal.SIGKILL)
@@ -121,7 +120,10 @@ async def _relay_stderr(
         inspect_log_line(line, state, discovery)
 
 
-async def run_attempt(engine_args: list[str], discovery: bool) -> tuple[int, str, SessionState]:
+async def run_attempt(
+    engine_args: list[str], discovery: bool,
+    stop_event: asyncio.Event | None = None,
+) -> tuple[int, str, SessionState]:
     now = time.monotonic()
     state = SessionState(started_at=now, last_progress=now)
     proc = await asyncio.create_subprocess_exec(
@@ -143,6 +145,10 @@ async def run_attempt(engine_args: list[str], discovery: bool) -> tuple[int, str
             except asyncio.TimeoutError:
                 pass
             now = time.monotonic()
+            if stop_event is not None and stop_event.is_set():
+                reason = "shutdown"
+                await _terminate_tree(proc)
+                break
             if state.authorization_rejection:
                 reason = "authorization"
                 await _terminate_tree(proc)
@@ -151,6 +157,11 @@ async def run_attempt(engine_args: list[str], discovery: bool) -> tuple[int, str
                 reason = "signaling_timeout"
                 await _terminate_tree(proc)
                 break
+            if state.sdp_seen and not state.datachannel_seen:
+                if now - state.last_progress >= CONNECTION_TIMEOUT:
+                    reason = "connection_timeout"
+                    await _terminate_tree(proc)
+                    break
             if not discovery and state.datachannel_seen and state.first_video_at is None:
                 if now - state.last_progress >= FIRST_FRAME_TIMEOUT:
                     reason = "first_frame_timeout"
@@ -163,8 +174,11 @@ async def run_attempt(engine_args: list[str], discovery: bool) -> tuple[int, str
                     break
         rc = await proc.wait()
     finally:
+        # Covers cancellation and a leader that exits before its process-group
+        # descendants. Shield cleanup so a second cancellation cannot strand them.
+        await asyncio.shield(_terminate_tree(proc))
         try:
-            await asyncio.wait_for(relay, timeout=2)
+            await asyncio.shield(asyncio.wait_for(relay, timeout=2))
         except asyncio.TimeoutError:
             relay.cancel()
     return rc, reason, state
@@ -173,6 +187,19 @@ async def run_attempt(engine_args: list[str], discovery: bool) -> tuple[int, str
 async def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     discovery = "--discover" in args
+    stop_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop_event.set)
+        except (NotImplementedError, RuntimeError):
+            # Windows event loops do not implement add_signal_handler.
+            try:
+                signal.signal(
+                    sig, lambda *_args: loop.call_soon_threadsafe(stop_event.set)
+                )
+            except ValueError:
+                pass
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         if attempt > 1:
@@ -182,9 +209,16 @@ async def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
                 flush=True,
             )
-            await asyncio.sleep(delay)
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=delay)
+                return 0
+            except asyncio.TimeoutError:
+                pass
 
-        rc, reason, state = await run_attempt(args, discovery)
+        rc, reason, state = await run_attempt(args, discovery, stop_event)
+
+        if reason == "shutdown":
+            return 0
 
         if reason == "authorization":
             print("EUFY_AUTHORIZATION_ERROR_-104", file=sys.stderr, flush=True)
@@ -206,6 +240,12 @@ async def main(argv: list[str] | None = None) -> int:
             detail = "TURN remained pending" if state.turn_pending else "no SDP offer arrived"
             print(
                 f"eufy supervisor: signaling timed out ({detail}); starting a fresh signaling session",
+                file=sys.stderr,
+                flush=True,
+            )
+        elif reason == "connection_timeout":
+            print(
+                "eufy supervisor: SDP arrived but the peer/data channel did not connect; restarting producer",
                 file=sys.stderr,
                 flush=True,
             )

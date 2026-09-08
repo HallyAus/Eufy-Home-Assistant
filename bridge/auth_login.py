@@ -13,10 +13,13 @@ Env in:
                                          defaults to EUFY_REGION when unset
   EUFY_STATION_SN                        optional override / fallback
   EUFY_CAPTCHA_ID, EUFY_CAPTCHA_ANSWER   optional, if a prior run reported a captcha
+  EUFY_VERIFICATION_CODE                optional six-digit mailbox verification code
   EUFY_AUTH                              output path (default <bridge>/auth.json)
 Exit: 0 ok | 2 missing creds | 3 login failed | 4 no station_sn.
 """
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -28,6 +31,33 @@ import eufy_cloud as ec  # noqa: E402
 
 REGION_MAP = {"US": "us-pr", "EU": "eu-pr", "IE": "ie-pr"}
 _SERIAL_RE = re.compile(r"[A-Z0-9]{12,20}")
+_CACHE_VERSION = 1
+
+
+def account_fingerprint(email: str, region: str, country: str) -> str:
+    """Return a stable, non-plaintext binding for an auth cache."""
+    identity = "\0".join((email.strip().casefold(), region, country.upper()))
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
+
+
+def cache_matches(path: str, email: str, region: str, country: str) -> bool:
+    """Accept only a complete cache explicitly bound to the configured account."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            cached = json.load(handle)
+    except (OSError, ValueError, TypeError):
+        return False
+    if not isinstance(cached, dict):
+        return False
+    actual = cached.get("accountFingerprint", "")
+    return bool(
+        cached.get("cacheVersion") == _CACHE_VERSION
+        and cached.get("authToken")
+        and cached.get("stationSn")
+        and isinstance(actual, str)
+        and hmac.compare_digest(
+            actual, account_fingerprint(email, region, country))
+    )
 
 
 def _find_station_sn(raw) -> str:
@@ -59,10 +89,6 @@ def _find_station_sn(raw) -> str:
 
 async def main() -> int:
     email = os.environ.get("EUFY_EMAIL", "").strip()
-    password = os.environ.get("EUFY_PASSWORD", "")
-    if not email or not password:
-        print("auth_login: EUFY_EMAIL / EUFY_PASSWORD not set", file=sys.stderr)
-        return 2
     region_opt = (os.environ.get("EUFY_REGION") or "US").strip().upper()
     region = REGION_MAP.get(region_opt, "us-pr")
     # Account country (the login `ab` field / Web-Country header). Defaults to the region, but
@@ -70,11 +96,22 @@ async def main() -> int:
     # authenticate against the nearest server region while still identifying their real country.
     country = (os.environ.get("EUFY_COUNTRY") or region_opt).strip().upper()
 
+    if len(sys.argv) == 3 and sys.argv[1] == "--check-cache":
+        if not email:
+            return 1
+        return 0 if cache_matches(sys.argv[2], email, region, country) else 1
+
+    password = os.environ.get("EUFY_PASSWORD", "")
+    if not email or not password:
+        print("auth_login: EUFY_EMAIL / EUFY_PASSWORD not set", file=sys.stderr)
+        return 2
+
     try:
         creds = await ec.login(
             email, password, region=region, country=country,
             captcha_id=os.environ.get("EUFY_CAPTCHA_ID", ""),
-            answer=os.environ.get("EUFY_CAPTCHA_ANSWER", ""))
+            answer=os.environ.get("EUFY_CAPTCHA_ANSWER", ""),
+            verification_code=os.environ.get("EUFY_VERIFICATION_CODE", ""))
     except ec.EufyCloudError as exc:
         print(f"auth_login: login failed: {exc}", file=sys.stderr)
         return 3
@@ -110,6 +147,8 @@ async def main() -> int:
         "region": region,
         "webCountry": country,
         "appName": "eufy_mega",
+        "cacheVersion": _CACHE_VERSION,
+        "accountFingerprint": account_fingerprint(email, region, country),
     }
     old = os.umask(0o077)
     temp_path = None

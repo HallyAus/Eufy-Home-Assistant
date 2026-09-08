@@ -20,6 +20,11 @@ if ! bashio::config.has_value 'email' || ! bashio::config.has_value 'password'; 
     sleep 15
     exit 1
 fi
+if ! bashio::config.has_value 'go2rtc_username' || ! bashio::config.has_value 'go2rtc_password'; then
+    bashio::log.fatal "Set go2rtc_username and a go2rtc_password of at least 16 characters. These protect camera video and the management API on your LAN."
+    sleep 15
+    exit 1
+fi
 
 export EUFY_EMAIL="$(bashio::config 'email')"
 export EUFY_PASSWORD="$(bashio::config 'password')"
@@ -27,20 +32,30 @@ export EUFY_REGION="$(bashio::config 'region' 'US')"
 export EUFY_AUTH="${STATE_DIR}/auth.json"
 export EUFY_CAMERAS="${STATE_DIR}/cameras.json"
 export EUFY_STREAM_NAMES="${STATE_DIR}/stream_names.json"
+export GO2RTC_USERNAME="$(bashio::config 'go2rtc_username')"
+export GO2RTC_PASSWORD="$(bashio::config 'go2rtc_password')"
+if [ "${#GO2RTC_PASSWORD}" -lt 16 ]; then
+    bashio::log.fatal "go2rtc_password must contain at least 16 characters."
+    sleep 15
+    exit 1
+fi
 if bashio::config.has_value 'country'; then export EUFY_COUNTRY="$(bashio::config 'country')"; fi
 if bashio::config.has_value 'station_sn'; then export EUFY_STATION_SN="$(bashio::config 'station_sn')"; fi
 if bashio::config.has_value 'captcha_id'; then export EUFY_CAPTCHA_ID="$(bashio::config 'captcha_id')"; fi
 if bashio::config.has_value 'captcha_answer'; then export EUFY_CAPTCHA_ANSWER="$(bashio::config 'captcha_answer')"; fi
+if bashio::config.has_value 'verification_code'; then export EUFY_VERIFICATION_CODE="$(bashio::config 'verification_code')"; fi
 
 umask 077
 if ! python3 auth_login.py; then
-    if [ -s "${EUFY_AUTH}" ]; then
-        bashio::log.warning "Fresh login failed; retaining the cached auth session for local startup."
-        bashio::log.warning "Verify region/country or CAPTCHA settings before the cached session expires."
+    if python3 auth_login.py --check-cache "${EUFY_AUTH}"; then
+        bashio::log.warning "Fresh login failed; using the cache bound to this exact account/region/country."
+        bashio::log.warning "Verify region/country, CAPTCHA, or mailbox verification settings before the cached session expires."
     else
-        bashio::log.fatal "Headless login failed and no cached session exists. Verify email / password / region."
-        bashio::log.fatal "If the log above shows a CAPTCHA, set captcha_id + captcha_answer and restart."
+        bashio::log.fatal "Headless login failed and no matching account-bound cache exists. Refusing to reuse unknown or different-account credentials."
+        bashio::log.fatal "For mailbox verification, enter the emailed six-digit verification_code and restart."
+        bashio::log.fatal "For a graphic CAPTCHA, set captcha_id + captcha_answer and restart."
         unset EUFY_PASSWORD
+        unset EUFY_VERIFICATION_CODE
         sleep 15
         exit 1
     fi
@@ -48,6 +63,7 @@ else
     bashio::log.info "Logged in; refreshed auth.json (region $(bashio::config 'region' 'US'))."
 fi
 unset EUFY_PASSWORD
+unset EUFY_VERIFICATION_CODE
 chmod 600 "${EUFY_AUTH}" 2>/dev/null || true
 bashio::log.info "Credentials kept out of logs; runtime state is persisted under /data."
 

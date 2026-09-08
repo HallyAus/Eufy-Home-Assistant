@@ -17,10 +17,13 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import (
     CONF_API_PORT,
     CONF_HOST,
+    CONF_PASSWORD,
     CONF_RTSP_PORT,
+    CONF_USERNAME,
     DEFAULT_API_PORT,
     DEFAULT_HOST,
     DEFAULT_RTSP_PORT,
+    DEFAULT_USERNAME,
     DOMAIN,
     REQUEST_TIMEOUT,
 )
@@ -29,11 +32,14 @@ from .go2rtc_api import (
     Go2RtcError,
     host_from_internal_url,
     normalize_host,
+    validate_credentials,
     validate_port,
 )
 
 
-async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
+async def _validate_go2rtc(
+    hass, host: str, api_port: int, username: str, password: str
+) -> tuple[str, int]:
     """Probe go2rtc and return its normalized host and Eufy stream count.
 
     Distinguishes bad input, an unreachable API, and a reachable bridge that has
@@ -43,6 +49,7 @@ async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
     try:
         normalized_host = normalize_host(host)
         validate_port(api_port)
+        username, password = validate_credentials(username, password)
     except ValueError as err:
         raise InvalidEndpoint from err
 
@@ -55,7 +62,9 @@ async def _validate_go2rtc(hass, host: str, api_port: int) -> tuple[str, int]:
     last_error: Go2RtcError | None = None
     response_error: Exception | None = None
     for candidate in candidates:
-        client = Go2RtcClient(session, candidate, api_port, REQUEST_TIMEOUT)
+        client = Go2RtcClient(
+            session, candidate, api_port, REQUEST_TIMEOUT, username, password
+        )
         try:
             streams = await client.async_get_streams()
         except Go2RtcError as err:
@@ -89,6 +98,12 @@ def _schema(defaults: dict[str, Any]) -> vol.Schema:
             vol.Required(
                 CONF_RTSP_PORT, default=defaults.get(CONF_RTSP_PORT, DEFAULT_RTSP_PORT)
             ): vol.All(int, vol.Range(min=1, max=65535)),
+            vol.Required(
+                CONF_USERNAME, default=defaults.get(CONF_USERNAME, DEFAULT_USERNAME)
+            ): vol.All(str, vol.Length(min=1, max=64)),
+            vol.Required(
+                CONF_PASSWORD, default=defaults.get(CONF_PASSWORD, "")
+            ): vol.All(str, vol.Length(min=16, max=256)),
         }
     )
 
@@ -124,10 +139,14 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
             host = user_input[CONF_HOST]
             api_port = user_input[CONF_API_PORT]
             rtsp_port = user_input[CONF_RTSP_PORT]
+            username = user_input[CONF_USERNAME]
+            password = user_input[CONF_PASSWORD]
 
             try:
                 _validate_rtsp_port(rtsp_port)
-                host, _ = await _validate_go2rtc(self.hass, host, api_port)
+                host, _ = await _validate_go2rtc(
+                    self.hass, host, api_port, username, password
+                )
             except InvalidEndpoint:
                 errors["base"] = "invalid_endpoint"
             except CannotConnect:
@@ -147,6 +166,8 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_HOST: host,
                         CONF_API_PORT: api_port,
                         CONF_RTSP_PORT: rtsp_port,
+                        CONF_USERNAME: username,
+                        CONF_PASSWORD: password,
                     },
                 )
 
@@ -166,9 +187,13 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             host = user_input[CONF_HOST]
             api_port = user_input[CONF_API_PORT]
+            username = user_input[CONF_USERNAME]
+            password = user_input[CONF_PASSWORD]
             try:
                 _validate_rtsp_port(user_input[CONF_RTSP_PORT])
-                host, _ = await _validate_go2rtc(self.hass, host, api_port)
+                host, _ = await _validate_go2rtc(
+                    self.hass, host, api_port, username, password
+                )
             except InvalidEndpoint:
                 errors["base"] = "invalid_endpoint"
             except CannotConnect:
@@ -191,6 +216,8 @@ class EufyNvrConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_HOST: host,
                         CONF_API_PORT: api_port,
                         CONF_RTSP_PORT: user_input[CONF_RTSP_PORT],
+                        CONF_USERNAME: username,
+                        CONF_PASSWORD: password,
                     },
                 )
 

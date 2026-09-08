@@ -25,7 +25,9 @@ def test_canonical_hosts(value, expected):
 
 def test_ipv6_management_and_rtsp_urls():
     assert api.api_base_url("FD00::10", 1985) == "http://[fd00::10]:1985"
-    assert api.rtsp_url("fd00::10", 8556, "eufy_front gate") == "rtsp://[fd00::10]:8556/eufy_front%20gate"
+    assert api.rtsp_url(
+        "fd00::10", 8556, "eufy_front gate", "eufy", "long pass:@/word!"
+    ) == "rtsp://eufy:long%20pass%3A%40%2Fword%21@[fd00::10]:8556/eufy_front%20gate"
 
 
 class Response:
@@ -45,7 +47,10 @@ class Response:
 
 
 def client(response):
-    return api.Go2RtcClient(SimpleNamespace(get=lambda *args, **kwargs: response), "bridge.local", 1985, 10)
+    return api.Go2RtcClient(
+        SimpleNamespace(get=lambda *args, **kwargs: response),
+        "bridge.local", 1985, 10, "eufy", "0123456789abcdef"
+    )
 
 
 @pytest.mark.asyncio

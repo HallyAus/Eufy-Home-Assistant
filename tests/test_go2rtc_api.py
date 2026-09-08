@@ -34,8 +34,11 @@ class EndpointTest(unittest.TestCase):
             "http://192.168.1.177:1984/api/streams",
         )
         self.assertEqual(
-            api.rtsp_url("fd00::10", 8554, "eufy_front_gate"),
-            "rtsp://[fd00::10]:8554/eufy_front_gate",
+            api.rtsp_url(
+                "fd00::10", 8554, "eufy_front_gate",
+                "eufy", "0123456789abcdef"
+            ),
+            "rtsp://eufy:0123456789abcdef@[fd00::10]:8554/eufy_front_gate",
         )
 
     def test_rejects_invalid_ports(self):

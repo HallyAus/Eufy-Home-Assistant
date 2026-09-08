@@ -16,6 +16,8 @@ DOMAIN = "eufy_nvr"
 CONF_HOST = "host"
 CONF_API_PORT = "api_port"
 CONF_RTSP_PORT = "rtsp_port"
+CONF_USERNAME = "username"
+CONF_PASSWORD = "password"
 
 # --- defaults ----------------------------------------------------------------
 # The add-on is host-networked but HA Core is a separate container, so loopback
@@ -24,6 +26,7 @@ CONF_RTSP_PORT = "rtsp_port"
 DEFAULT_HOST = "homeassistant.local"
 DEFAULT_API_PORT = 1985  # dedicated Eufy go2rtc REST API / web UI
 DEFAULT_RTSP_PORT = 8556  # dedicated Eufy go2rtc RTSP server
+DEFAULT_USERNAME = "eufy"
 
 # How often the coordinator re-queries go2rtc so newly added cameras appear and
 # availability is kept fresh. Cheap localhost call; 30s is responsive enough.

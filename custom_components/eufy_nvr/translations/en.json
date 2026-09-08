@@ -3,16 +3,20 @@
     "step": {
       "user": {
         "title": "Eufy NVR (local)",
-        "description": "Point this at the go2rtc instance run by the Eufy NVR add-on or bridge. Cameras are discovered automatically from its eufy_* streams — you do not enter channel names. For the add-on, use your Home Assistant host's LAN address.",
+        "description": "Point this at the go2rtc instance run by the Eufy NVR add-on or bridge. Use the same local username and password configured in the add-on. Cameras are discovered automatically from its eufy_* streams.",
         "data": {
           "host": "go2rtc host (IP)",
           "api_port": "go2rtc API port",
-          "rtsp_port": "RTSP port"
+          "rtsp_port": "RTSP port",
+          "username": "Local go2rtc username",
+          "password": "Local go2rtc password"
         },
         "data_description": {
           "host": "IP or hostname of the machine running the bridge/add-on. For the add-on, use the Home Assistant host's LAN address.",
           "api_port": "Dedicated Eufy go2rtc API / web UI port (default 1985), used to auto-discover cameras.",
-          "rtsp_port": "Dedicated Eufy go2rtc RTSP port (default 8556), used to stream each camera."
+          "rtsp_port": "Dedicated Eufy go2rtc RTSP port (default 8556), used to stream each camera.",
+          "username": "Must match go2rtc_username in the Eufy NVR add-on.",
+          "password": "Must match go2rtc_password in the Eufy NVR add-on (minimum 16 characters)."
         }
       },
       "reconfigure": {
@@ -21,7 +25,9 @@
         "data": {
           "host": "go2rtc host (IP)",
           "api_port": "go2rtc API port",
-          "rtsp_port": "RTSP port"
+          "rtsp_port": "RTSP port",
+          "username": "Local go2rtc username",
+          "password": "Local go2rtc password"
         }
       }
     },

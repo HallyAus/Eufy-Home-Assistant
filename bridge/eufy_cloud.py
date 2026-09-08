@@ -80,6 +80,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -117,6 +118,11 @@ DOMAINS: Dict[str, Dict[str, str]] = {
         "us-pr": "https://app-openapi-us-pr.eufy.com",
         "eu-pr": "https://app-openapi-eu-pr.eufy.com",
         "ie-pr": "https://app-openapi-ie-pr.eufy.com",
+    },
+    "push": {
+        "us-pr": "https://app-push-us-pr.eufy.com",
+        "eu-pr": "https://app-push-eu-pr.eufy.com",
+        "ie-pr": "https://app-push-ie-pr.eufy.com",
     },
     # `security` is the service `wn` (the v3 request wrapper) and the v3 key/exchange
     # actually target -- NOT a "*.eufy.com" host. Verbatim from bundle.
@@ -681,6 +687,7 @@ def _passport_base(region: str) -> str:
 async def login(email: str, password: str, region: str = "us-pr", *,
                 country: str = "US", language: str = "en-US",
                 captcha_id: str = "", answer: str = "",
+                verification_code: str = "",
                 server_pub_hex: Optional[str] = None,
                 user_agent: Optional[str] = None,
                 key_obj: Optional[KeyExchange] = None,
@@ -698,8 +705,10 @@ async def login(email: str, password: str, region: str = "us-pr", *,
     login-specific.
 
     The password is ECDH(P-256)+AES-256-CBC encrypted (see encrypt_password). Pass
-    ``captcha_id``+``answer`` to satisfy a graphic captcha -- if the server demands one,
-    login() auto-fetches the captcha image and tells you the id/path so you can re-run.
+    ``captcha_id``+``answer`` satisfy a graphic captcha.  When Eufy requires mailbox
+    verification (``fa_info.step == 26052``), the first call requests an email code and
+    raises :class:`EufyVerificationRequired`; repeat the call with the six-digit
+    ``verification_code`` to finish the same encrypted login flow.
     """
     ua = user_agent or WEB_USER_AGENT
     srv_pub = server_pub_hex or LOGIN_SERVER_PUBKEY_FALLBACK
@@ -747,11 +756,41 @@ async def login(email: str, password: str, region: str = "us-pr", *,
             hint = f" (could not auto-fetch captcha: {exc})"
         raise EufyCloudError(f"login(): CAPTCHA required (code={code}).{hint}")
 
-    # ---- 2FA / rate-limit / generic failures -----------------------------------------
+    # ---- mailbox/device verification (official web /2fa flow) ------------------------
     if (data.get("fa_info") or {}).get("step") == 26052:
-        raise EufyCloudError(
-            "login(): two-factor authentication required (fa_info.step=26052) -- this "
-            "account needs a 2FA code; headless 2FA is not implemented.")
+        challenge_token = data.get("auth_token") or data.get("token") or ""
+        server_secret = data.get("server_secret_info") or {}
+        server_public_key = (server_secret.get("public_key", "")
+                             if isinstance(server_secret, dict) else "")
+        if not challenge_token:
+            raise EufyCloudError(
+                "login(): verification challenge did not include a provisional token")
+
+        if not verification_code:
+            sent = await _send_login_verification_code(
+                challenge_token, server_public_key, email=email, country=country,
+                language=language, user_agent=ua, region=region, key_obj=key_obj,
+                timeout=timeout)
+            detail = "code requested by email" if sent else "code request was not confirmed"
+            raise EufyVerificationRequired(
+                "login(): email verification required (fa_info.step=26052); "
+                f"{detail}. Set the six-digit verification code and retry.")
+
+        if not re.fullmatch(r"\d{6}", verification_code):
+            raise EufyCloudError("login(): verification code must be exactly six digits")
+
+        verified_body = {**login_body, "verify_code": verification_code}
+        env = await encrypted_post(
+            "/passport/login", verified_body, challenge_token,
+            key_obj=key_obj, gtoken="", region=region, web_country=country,
+            service="passport",
+            extra_headers=_passport_headers(
+                email, country, language, ua, auth_token=challenge_token),
+            return_envelope=True, verify_signature=False, timeout=timeout)
+        code = env.get("code")
+        data = env.get("data") if isinstance(env.get("data"), dict) else {}
+        if (data.get("fa_info") or {}).get("step") == 26052:
+            raise EufyCloudError("login(): verification code was rejected or expired")
     if code in (100028, 100041):
         raise EufyCloudError(
             f"login(): login limit reached (code={code}) -- retry after ~24h.")
@@ -821,7 +860,7 @@ def _openudid(email: str, user_agent: str) -> str:
 
 
 def _passport_headers(email: str, country: str, language: str,
-                      user_agent: str) -> Dict[str, str]:
+                      user_agent: str, auth_token: str = "") -> Dict[str, str]:
     """
     Ba()/K() base headers + the login overrides (X-Auth-Token:"", Openudid). App-Name and
     Model-Type are injected by the web app's request wrapper; we set them explicitly.
@@ -835,9 +874,36 @@ def _passport_headers(email: str, country: str, language: str,
         "Phone_model": "Win32",
         "Model-type": "WEB", "Model_type": "WEB", "Model-Type": "WEB",
         "Country": country, "Language": language, "Timezone": "",
-        "X-Auth-Token": "",
+        "X-Auth-Token": auth_token,
         "Openudid": _openudid(email, user_agent),
     }
+
+
+async def _send_login_verification_code(
+        auth_token: str, server_public_key: str, *, email: str, country: str,
+        language: str, user_agent: str, region: str, key_obj: KeyExchange,
+        timeout: int) -> bool:
+    """Request the mailbox code used by Eufy's current web ``/2fa`` screen.
+
+    The official client posts to the regional push service with ``biz_type=1004``
+    and ``message_type=2`` while authenticating with the provisional login token.
+    """
+    if not server_public_key:
+        return False
+    env = await encrypted_post(
+        "/app/sendmsg/verify_code",
+        {
+            "biz_type": 1004,
+            "message_type": 2,
+            "client_secret_info": {"public_key": server_public_key},
+        },
+        auth_token,
+        key_obj=key_obj, gtoken="", region=region, web_country=country,
+        service="push",
+        extra_headers=_passport_headers(
+            email, country, language, user_agent, auth_token=auth_token),
+        return_envelope=True, verify_signature=False, timeout=timeout)
+    return env.get("code") == 0
 
 
 async def get_captcha(*, region: str = "us-pr", language: str = "en-US",
@@ -886,6 +952,10 @@ class EufyCloudError(RuntimeError):
     """Raised on handshake / request / decode / login failures."""
 
 
+class EufyVerificationRequired(EufyCloudError):
+    """Raised after requesting the email code required to finish login."""
+
+
 __all__ = [
     "DOMAINS", "APP_NAME", "EXCHANGE_BOOTSTRAP_KEY",
     "normalize_region", "base_url", "smart_urls",
@@ -894,7 +964,7 @@ __all__ = [
     "ecdh_handshake", "encrypted_post",
     "station_list", "house_list", "device_list", "parse_stations",
     "login", "encrypt_password", "get_captcha", "LOGIN_SERVER_PUBKEY_FALLBACK",
-    "EufyCloudError",
+    "EufyCloudError", "EufyVerificationRequired",
 ]
 
 

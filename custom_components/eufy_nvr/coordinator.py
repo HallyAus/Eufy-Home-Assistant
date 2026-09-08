@@ -19,6 +19,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .const import (
     CONF_API_PORT,
     CONF_HOST,
+    CONF_PASSWORD,
+    CONF_USERNAME,
     DOMAIN,
     REQUEST_TIMEOUT,
     UPDATE_INTERVAL,
@@ -45,6 +47,8 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             entry.data[CONF_HOST],
             entry.data[CONF_API_PORT],
             REQUEST_TIMEOUT,
+            entry.data.get(CONF_USERNAME, ""),
+            entry.data.get(CONF_PASSWORD, ""),
         )
         self.host = self._client.host
         self.api_port = self._client.api_port

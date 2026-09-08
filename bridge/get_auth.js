@@ -41,7 +41,20 @@ const fs = require("fs");
   if (!out || !out.authToken) { console.error("No ws/sign request seen — make sure you opened the NVR live view."); await ctx.close(); process.exit(1); }
   // grab the encrypted account id from localStorage; the bridge decrypts it (AES passphrase "aes")
   try { out.auid = await page.evaluate(() => localStorage.getItem("auid")); } catch {}
-  fs.writeFileSync(path.join(__dirname, "auth.json"), JSON.stringify(out, null, 2));
-  console.log("Wrote auth.json (token", out.authToken.slice(0, 8) + "..., station", out.stationSn + ").");
+  const target = path.join(__dirname, "auth.json");
+  const temporary = path.join(__dirname, `.auth-${process.pid}-${Date.now()}.tmp`);
+  let fd;
+  try {
+    fd = fs.openSync(temporary, "wx", 0o600);
+    fs.writeFileSync(fd, JSON.stringify(out, null, 2), { encoding: "utf8" });
+    fs.fsyncSync(fd);
+    fs.closeSync(fd); fd = undefined;
+    fs.renameSync(temporary, target);
+    try { fs.chmodSync(target, 0o600); } catch {}
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+    try { fs.unlinkSync(temporary); } catch {}
+  }
+  console.log("Wrote auth.json with private permissions (credentials not logged).");
   await ctx.close(); process.exit(0);
 })().catch((e) => { console.error("FATAL", e && e.stack ? e.stack : e); process.exit(1); });

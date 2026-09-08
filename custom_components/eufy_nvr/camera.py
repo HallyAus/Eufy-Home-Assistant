@@ -20,7 +20,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import EufyNvrConfigEntry
 from .const import (
     CONF_HOST,
+    CONF_PASSWORD,
     CONF_RTSP_PORT,
+    CONF_USERNAME,
     DEVICE_NAME,
     DOMAIN,
     MANUFACTURER,
@@ -48,6 +50,8 @@ async def async_setup_entry(
     coordinator = entry.runtime_data
     host: str = entry.data[CONF_HOST]
     rtsp_port: int = entry.data[CONF_RTSP_PORT]
+    username: str = entry.data[CONF_USERNAME]
+    password: str = entry.data[CONF_PASSWORD]
 
     known: set[str] = set()
 
@@ -60,7 +64,10 @@ async def async_setup_entry(
             return
         known.update(new)
         async_add_entities(
-            EufyNvrCamera(coordinator, entry.entry_id, host, rtsp_port, name)
+            EufyNvrCamera(
+                coordinator, entry.entry_id, host, rtsp_port,
+                username, password, name
+            )
             for name in sorted(new)
         )
 
@@ -81,6 +88,8 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
         entry_id: str,
         host: str,
         rtsp_port: int,
+        username: str,
+        password: str,
         stream: str,
     ) -> None:
         """Initialise the camera entity."""
@@ -89,7 +98,9 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
 
         self._stream = stream
         self._snapshot_cache = SnapshotCache()
-        self._stream_source = rtsp_url(host, rtsp_port, stream)
+        self._stream_source = rtsp_url(
+            host, rtsp_port, stream, username, password
+        )
 
         self._attr_name = _friendly_name(stream)
         # Stable across host/port edits so history/automations survive a reconfig.

@@ -291,7 +291,8 @@ async def main():
     pc = RTCPeerConnection(RTCConfiguration(iceServers=[]))
     chans = {}
     state = {"connected": False, "started": False, "vbytes": 0, "vframes": 0, "ptcs_in": 0,
-             "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False}
+             "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False,
+             "fatal_reason": None, "shutting_down": False}
     dumpf = open(VIDEO_DUMP, "wb"); framelog = open(FRAMES_LOG, "w")
 
     # Pick the Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file.
@@ -321,7 +322,8 @@ async def main():
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL)
         sink = ffmpeg_proc.stdin
-        log(f"ffmpeg publishing {_codec_label} -> {RTSP_URL}")
+        # RTSP_URL may contain the local go2rtc password; never print it.
+        log(f"ffmpeg publishing {_codec_label} to the configured RTSP endpoint")
     elif STDOUT_MODE:
         sink = sys.stdout.buffer
     else:
@@ -344,13 +346,20 @@ async def main():
         cmdid = (buf[4] | (buf[5] << 8)) if (xz and len(buf) >= 6) else -1
         payload = buf[16:] if xz else buf
         if cmdid in (1300, 1301, 1303):                      # VIDEO: strip 16B XZYH + 22B media hdr -> Annex-B
+            if ffmpeg_proc is not None and ffmpeg_proc.returncode is not None:
+                if state["fatal_reason"] is None:
+                    state["fatal_reason"] = f"ffmpeg exited rc={ffmpeg_proc.returncode}"
+                    log(f"FFMPEG_EXIT rc={ffmpeg_proc.returncode}")
+                return
             nal = payload[22:]
             state["vbytes"] += len(nal); state["vframes"] += 1
             try:
                 sink.write(nal)
                 if hasattr(sink, "flush"): sink.flush()   # StreamWriter (ffmpeg.stdin) has no flush()
             except Exception as e:
+                state["fatal_reason"] = f"video sink failed ({type(e).__name__})"
                 log("sink write err:", e)
+                return
             if state["vframes"] <= 8 or state["vframes"] % 30 == 0:
                 log(f"VIDEO #{state['vframes']} cmd={cmdid} link={link} payload={len(payload)} "
                     f"nal={payload[:8].hex()} total={state['vbytes']}")
@@ -478,6 +487,17 @@ async def main():
                                   user_agent_header=UA, max_size=2**22) as ws:
         sig = Signal(ws, sign_token); log("WSS connected; joining..."); await sig.join()
         answered = [False]; pending = []
+        ffmpeg_watchdog_task = None
+
+        async def ffmpeg_watchdog():
+            rc = await ffmpeg_proc.wait()
+            if not state["shutting_down"]:
+                state["fatal_reason"] = f"ffmpeg exited rc={rc}"
+                log(f"FFMPEG_EXIT rc={rc}")
+                await ws.close()
+
+        if ffmpeg_proc is not None:
+            ffmpeg_watchdog_task = asyncio.create_task(ffmpeg_watchdog())
 
         async def add_cand(cand):
             try:
@@ -545,21 +565,41 @@ async def main():
                     log("collected plenty of video; stopping."); break
         except Exception as e:
             log("ws loop err:", repr(e))
+        finally:
+            state["shutting_down"] = True
+            if ffmpeg_watchdog_task is not None and not ffmpeg_watchdog_task.done():
+                ffmpeg_watchdog_task.cancel()
+                await asyncio.gather(ffmpeg_watchdog_task, return_exceptions=True)
 
     await pc.close(); dumpf.close(); framelog.close()
     if oracle.proc:
-        try: oracle.proc.terminate()
-        except Exception: pass
+        try:
+            oracle.proc.terminate()
+            await asyncio.wait_for(oracle.proc.wait(), timeout=3)
+        except asyncio.TimeoutError:
+            oracle.proc.kill()
+            await oracle.proc.wait()
+        except ProcessLookupError:
+            pass
     if ffmpeg_proc:
         try:
-            ffmpeg_proc.stdin.close(); ffmpeg_proc.terminate()
-        except Exception: pass
+            if ffmpeg_proc.stdin:
+                ffmpeg_proc.stdin.close()
+            if ffmpeg_proc.returncode is None:
+                ffmpeg_proc.terminate()
+                try:
+                    await asyncio.wait_for(ffmpeg_proc.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    ffmpeg_proc.kill()
+                    await ffmpeg_proc.wait()
+        except ProcessLookupError:
+            pass
     log(f"DONE. video frames={state['vframes']} bytes={state['vbytes']} ptcs_in={state['ptcs_in']} "
         f"frames_seen={state['frames_seen']}")
     # In --discover mode only a written manifest counts as success. Returning this lets
     # the caller (the add-on run.sh) tell a real discovery from one that merely timed
     # out — otherwise it logs "Discovery OK" and gen_go2rtc.py dies on a missing file.
-    return (not DISCOVER) or state["discovered"]
+    return ((not DISCOVER) or state["discovered"]) and not state["fatal_reason"]
 
 if __name__ == "__main__":
     try:

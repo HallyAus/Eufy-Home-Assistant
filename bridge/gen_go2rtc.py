@@ -116,8 +116,22 @@ def validate_port(value: int) -> int:
     return value
 
 
+def validate_credentials(username: str, password: str) -> tuple[str, str]:
+    """Validate credentials before embedding them in the private go2rtc config."""
+    if not isinstance(username, str) or not 1 <= len(username) <= 64:
+        raise ValueError("go2rtc username must be 1 to 64 characters")
+    if not isinstance(password, str) or not 16 <= len(password) <= 256:
+        raise ValueError("go2rtc password must be 16 to 256 characters")
+    if any(ord(character) < 32 or ord(character) == 127
+           for character in username + password):
+        raise ValueError("go2rtc credentials cannot contain control characters")
+    return username, password
+
+
 def render_config(
     named: list[tuple[str, dict[str, Any]]],
+    username: str,
+    password: str,
     api_port: int = 1984,
     rtsp_port: int = 8554,
     webrtc_port: int = 8555,
@@ -127,6 +141,7 @@ def render_config(
         raise ValueError("API, RTSP and WebRTC ports must be different")
     if not 1 <= STREAM_START_TIMEOUT <= 300:
         raise ValueError("EUFY_STREAM_START_TIMEOUT must be between 1 and 300 seconds")
+    username, password = validate_credentials(username, password)
 
     online = [(name, camera) for name, camera in named if camera.get("status") != 0]
     lines = [
@@ -149,9 +164,14 @@ def render_config(
         "",
         "rtsp:",
         f'  listen: ":{rtsp_port}"',
+        f"  username: {json.dumps(username)}",
+        f"  password: {json.dumps(password)}",
         "",
         "api:",
         f'  listen: ":{api_port}"',
+        f"  username: {json.dumps(username)}",
+        f"  password: {json.dumps(password)}",
+        "  local_auth: false",
         "  allow_paths: [/api, /api/streams, /api/webrtc, /api/frame.jpeg]",
         "",
         "webrtc:",
@@ -186,7 +206,8 @@ def atomic_write(path: Path, text: str) -> None:
 
 def generate(
     manifest_path: Path, output_path: Path, registry_path: Path,
-    *, api_port: int = 1984, rtsp_port: int = 8554, webrtc_port: int = 8555,
+    *, username: str, password: str, api_port: int = 1984,
+    rtsp_port: int = 8554, webrtc_port: int = 8555,
 ) -> list[tuple[str, dict[str, Any]]]:
     paths = [path.resolve() for path in (manifest_path, output_path, registry_path)]
     if len(set(paths)) != 3:
@@ -195,7 +216,7 @@ def generate(
     previous = validate_registry(json.loads(registry_path.read_text(encoding="utf-8"))) \
         if registry_path.exists() else {}
     named, names = assign_names(manifest, previous)
-    config = render_config(named, api_port, rtsp_port, webrtc_port)
+    config = render_config(named, username, password, api_port, rtsp_port, webrtc_port)
     registry = json.dumps({"version": 1, "names": names}, indent=2, sort_keys=True) + "\n"
     atomic_write(registry_path, registry)
     atomic_write(output_path, config)
@@ -214,7 +235,10 @@ def main(argv: list[str] | None = None) -> int:
         api_port = int(os.environ.get("GO2RTC_API_PORT", "1984"))
         rtsp_port = int(os.environ.get("GO2RTC_RTSP_PORT", "8554"))
         webrtc_port = int(os.environ.get("GO2RTC_WEBRTC_PORT", "8555"))
+        username = os.environ.get("GO2RTC_USERNAME", "")
+        password = os.environ.get("GO2RTC_PASSWORD", "")
         named = generate(manifest_path, output_path, registry_path,
+                         username=username, password=password,
                          api_port=api_port, rtsp_port=rtsp_port, webrtc_port=webrtc_port)
     except FileNotFoundError:
         print("gen_go2rtc: discovery file or output directory not found; run `python eufy_run.py --discover` first", file=sys.stderr)

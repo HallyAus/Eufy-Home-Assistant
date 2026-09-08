@@ -30,6 +30,18 @@ def validate_port(port: int) -> int:
     return port
 
 
+def validate_credentials(username: str, password: str) -> tuple[str, str]:
+    """Return valid go2rtc credentials or raise ValueError."""
+    if not isinstance(username, str) or not 1 <= len(username) <= 64:
+        raise ValueError("username must be 1 to 64 characters")
+    if not isinstance(password, str) or not 16 <= len(password) <= 256:
+        raise ValueError("password must be 16 to 256 characters")
+    if any(ord(character) < 32 or ord(character) == 127
+           for character in username + password):
+        raise ValueError("credentials cannot contain control characters")
+    return username, password
+
+
 def normalize_host(value: str) -> str:
     """Normalize an IP/hostname or a bare HTTP URL to a host value."""
     if not isinstance(value, str):
@@ -124,9 +136,16 @@ def api_url(host: str, port: int) -> str:
     return f"{api_base_url(host, port)}{API_STREAMS_PATH}"
 
 
-def rtsp_url(host: str, port: int, stream: str) -> str:
+def rtsp_url(
+    host: str, port: int, stream: str, username: str, password: str
+) -> str:
     """Build a safe RTSP URL for a discovered stream name."""
-    return f"rtsp://{_url_host(host)}:{validate_port(port)}/{quote(stream, safe='_-')}"
+    username, password = validate_credentials(username, password)
+    userinfo = f"{quote(username, safe='')}:{quote(password, safe='')}@"
+    return (
+        f"rtsp://{userinfo}{_url_host(host)}:{validate_port(port)}/"
+        f"{quote(stream, safe='_-')}"
+    )
 
 
 def _stream_map(payload: Any) -> dict[str, dict[str, Any]]:
@@ -179,20 +198,29 @@ def summarize_streams(
 class Go2RtcClient:
     """Fetch camera stream metadata from one local go2rtc instance."""
 
-    def __init__(self, session: Any, host: str, api_port: int, timeout: int) -> None:
+    def __init__(
+        self, session: Any, host: str, api_port: int, timeout: int,
+        username: str, password: str,
+    ) -> None:
+        from aiohttp import encode_basic_auth
+
         self.host = normalize_host(host)
         self.api_port = validate_port(api_port)
+        username, password = validate_credentials(username, password)
         self.url = api_url(self.host, self.api_port)
         self.total_stream_count = 0
         self._session = session
         self._timeout = timeout
+        self._headers = {"Authorization": encode_basic_auth(username, password)}
 
     async def async_get_streams(self) -> dict[str, dict[str, Any]]:
         """Fetch and parse the configured Eufy streams."""
         from aiohttp import ClientError, ClientResponseError
 
         try:
-            async with self._session.get(self.url, timeout=self._timeout) as response:
+            async with self._session.get(
+                self.url, timeout=self._timeout, headers=self._headers
+            ) as response:
                 response.raise_for_status()
                 payload = await response.json(content_type=None)
         except ClientResponseError as err:
