@@ -17,6 +17,7 @@
   source commit, and go2rtc version. Verify
   SHA-256 for go2rtc and all downloaded Eufy worker assets; remove the mutable unverified FFmpeg download.
 - Run CI against the real runtime dependency set on Python 3.12, 3.13, and 3.14, including import smoke tests.
+- Upgrade `idna` to 3.15, the first patched release for CVE-2026-45409.
 
 ## 0.7.1
 
