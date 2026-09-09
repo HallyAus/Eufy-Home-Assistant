@@ -10,7 +10,7 @@ Reuses the proven WebRTC transport (see eufy_webrtc.py / notes/04) and adds:
 Auth: captures/eufy_auth.json (webcap/token.js). user_id: captures/user_id.txt (decrypted from auid).
 Run:  python scripts/eufy_stream.py [channel]      (channel 0..3, default 0)
 """
-import asyncio, json, time, uuid, os, sys, hashlib, re, base64, struct
+import asyncio, json, time, uuid, os, sys, hashlib, re, base64, struct, ipaddress
 
 import aiohttp
 import websockets
@@ -36,7 +36,68 @@ def _broad_ssl_ctx(self, srtp_profiles):
     return ctx
 _RTCCert._create_ssl_context = _broad_ssl_ctx
 
+# The eufy NVR's DTLS certificate has a signatureAlgorithm field whose encoding
+# Python 'cryptography' (rust-asn1) rejects with "ExtraData in
+# TbsCertificate::signature_alg", even though OpenSSL accepts it and the DTLS
+# handshake completes. aiortc's peer-identity check reaches for the certificate
+# via get_peer_certificate(as_cryptography=True), which triggers that strict
+# parse and fails the connection right after ICE completes. Reimplement the same
+# check the RFC 4572 way -- hash the exact DER OpenSSL negotiated and compare it
+# to the remote SDP fingerprint -- so verification no longer depends on the
+# strict ASN.1 parser. Security is unchanged: a non-matching fingerprint still
+# fails the handshake.
+import hashlib as _hashlib
+from OpenSSL import crypto as _ossl_crypto
+from aiortc import rtcdtlstransport as _dtls_mod
+
+# Same algorithm set aiortc allows (RFC 8122): SHA-1 is deprecated and NOT accepted.
+_PEER_DIGESTS = {"sha-256": _hashlib.sha256, "sha-384": _hashlib.sha384,
+                 "sha-512": _hashlib.sha512}
+
+def _validate_peer_identity_via_der(self, remoteParameters):
+    # Relies on OpenSSL re-encoding the peer cert to the same DER the SDP
+    # fingerprint was computed over (true for this NVR's cert). Same accept/reject
+    # semantics as aiortc: every supported fingerprint must match, and there must
+    # be at least one. Fails CLOSED on peer=None, empty/unknown-only fingerprints,
+    # any mismatch, or any exception.
+    peer = self._ssl.get_peer_certificate()  # legacy OpenSSL X509; keeps the original DER
+    der = _ossl_crypto.dump_certificate(_ossl_crypto.FILETYPE_ASN1, peer)
+    supported = valid = 0
+    for f in remoteParameters.fingerprints:
+        fn = _PEER_DIGESTS.get(f.algorithm.lower())
+        if fn is None:
+            continue
+        supported += 1
+        hx = fn(der).hexdigest().upper()
+        digest = ":".join(hx[i:i + 2] for i in range(0, len(hx), 2))
+        if f.value.upper() == digest:
+            valid += 1
+    if not supported or valid != supported:
+        self._set_state(_dtls_mod.State.FAILED)  # fail closed first, then diagnose
+        print(f"[{time.strftime('%H:%M:%S')}] DTLS handshake failed (fingerprint mismatch)",
+              flush=True, file=sys.stderr)
+        return
+
+# Fail loudly if this aiortc build lacks the private method we override, so a
+# version bump can't silently fall back to the cryptography parser (which chokes on
+# this NVR's cert). Patch is process-wide; the bridge only speaks DTLS to the NVR.
+assert hasattr(_dtls_mod.RTCDtlsTransport, "_validate_peer_identity"), (
+    "aiortc RTCDtlsTransport._validate_peer_identity is missing; pin a compatible aiortc"
+)
+_dtls_mod.RTCDtlsTransport._validate_peer_identity = _validate_peer_identity_via_der
+
 ROOT = os.path.dirname(os.path.abspath(__file__))   # the bridge/ directory
+
+def _lan_ipv4(ip):
+    """True for a private (RFC 1918) IPv4 the NVR advertises as its LAN host ICE
+    candidate. Works on ANY home subnet -- 10.x, 172.16-31.x, 192.168.x -- so a
+    user is not tied to one hardcoded network."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return addr.version == 4 and addr.is_private and not addr.is_loopback and not addr.is_link_local
+
 def _bin(name):
     exe = name + (".exe" if os.name == "nt" else "")
     local = os.path.join(ROOT, "bin", exe)
@@ -572,7 +633,7 @@ async def main():
         async def add_cand(cand):
             try:
                 p = cand.split()
-                if len(p) > 7 and p[6] == "typ" and p[7] == "host" and p[4].startswith("192.168.1.") and not state["nvr_ip"]:
+                if len(p) > 7 and p[6] == "typ" and p[7] == "host" and _lan_ipv4(p[4]) and not state["nvr_ip"]:
                     state["nvr_ip"] = p[4]   # the NVR's LAN IP (direct path) from its host ICE candidate
                 c = candidate_from_sdp(cand.split(":", 1)[1]); c.sdpMid = "2"; c.sdpMLineIndex = 0
                 await pc.addIceCandidate(c)
