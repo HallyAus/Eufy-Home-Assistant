@@ -64,6 +64,10 @@ USER_ID = _decrypt_user_id()
 DISCOVER = "--discover" in sys.argv   # connect, run cmd 9100 -> list NVR ip + cameras (ch,name), write cameras.json, exit
 _carg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "0"
 CHANNELS = [0, 1, 2, 3] if _carg == "all" else [int(x) for x in _carg.split(",")]
+
+# Keep action3/control signaling anchored to the NVR primary channel (0).
+# Requested camera selection remains in CHANNELS/openLive/startStream.
+SIGNALING_CHANNEL = 0
 CALL_TYPE = os.environ.get("EUFY_CALL_TYPE", "call").strip().lower()
 if CALL_TYPE not in ("call", "scall"):
     raise SystemExit("EUFY_CALL_TYPE must be 'call' or 'scall'")
@@ -554,7 +558,7 @@ async def main():
     async with websockets.connect(WS_URL, subprotocols=["v1", subproto],
                                   additional_headers={"Origin": "https://security.eufy.com"},
                                   user_agent_header=UA, max_size=2**22) as ws:
-        sig = Signal(ws, sign_token, AUTH["authToken"], USER_ID, CHANNELS[0], CALL_TYPE)
+        sig = Signal(ws, sign_token, AUTH["authToken"], USER_ID, SIGNALING_CHANNEL, CALL_TYPE)
         log(f"WSS connected; joining with {CALL_TYPE} signaling..."); await sig.join()
         answered = [False]; pending = []
         ffmpeg_watchdog_task = None
