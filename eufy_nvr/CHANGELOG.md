@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.17
+
+- Anchor multi-channel signaling to channel 0, as validated by the reporter on a four-camera NVR.
+- Verify DTLS peer identity from the certificate's original DER bytes for devices whose certificates strict ASN.1 parsing rejects.
+- Stop the Home Assistant snapshot primer cleanly during integration unload.
+- Add an optional `disabled_channels` setting to keep cameras with unresolved stream failures out of go2rtc and snapshot priming.
+- Keep the add-on's immutable source pin current with these fixes. Camera-specific T8N00/S4 Max stream failures still require device validation.
+
 ## 0.7.16
 
 - Validate the persisted account-bound token against `ws/sign` before logging in. Container restarts and periodic
