@@ -60,18 +60,26 @@ def _validate_peer_identity_via_der(self, remoteParameters):
     # semantics as aiortc: every supported fingerprint must match, and there must
     # be at least one. Fails CLOSED on peer=None, empty/unknown-only fingerprints,
     # any mismatch, or any exception.
-    peer = self._ssl.get_peer_certificate()  # legacy OpenSSL X509; keeps the original DER
-    der = _ossl_crypto.dump_certificate(_ossl_crypto.FILETYPE_ASN1, peer)
-    supported = valid = 0
-    for f in remoteParameters.fingerprints:
-        fn = _PEER_DIGESTS.get(f.algorithm.lower())
-        if fn is None:
-            continue
-        supported += 1
-        hx = fn(der).hexdigest().upper()
-        digest = ":".join(hx[i:i + 2] for i in range(0, len(hx), 2))
-        if f.value.upper() == digest:
-            valid += 1
+    try:
+        peer = self._ssl.get_peer_certificate()  # OpenSSL X509, without strict ASN.1 parsing
+        if peer is None:
+            raise ValueError("peer certificate is missing")
+        der = _ossl_crypto.dump_certificate(_ossl_crypto.FILETYPE_ASN1, peer)
+        supported = valid = 0
+        for f in remoteParameters.fingerprints:
+            fn = _PEER_DIGESTS.get(f.algorithm.lower())
+            if fn is None:
+                continue
+            supported += 1
+            hx = fn(der).hexdigest().upper()
+            digest = ":".join(hx[i:i + 2] for i in range(0, len(hx), 2))
+            if f.value.upper() == digest:
+                valid += 1
+    except Exception:
+        self._set_state(_dtls_mod.State.FAILED)
+        print(f"[{time.strftime('%H:%M:%S')}] DTLS handshake failed (peer certificate unavailable)",
+              flush=True, file=sys.stderr)
+        return
     if not supported or valid != supported:
         self._set_state(_dtls_mod.State.FAILED)  # fail closed first, then diagnose
         print(f"[{time.strftime('%H:%M:%S')}] DTLS handshake failed (fingerprint mismatch)",

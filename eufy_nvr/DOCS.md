@@ -38,6 +38,8 @@ cloud; the video itself is pulled LAN-direct from the NVR.
      integration; use a password of at least 16 characters
    - `adaptive_warm_seconds` -> retain only the last-viewed camera for this many seconds after it closes
      (default `30`; a different camera preempts it; set `0` to disable)
+   - *(optional)* `disabled_channels` -> comma-separated channel numbers such as `0,2` to omit
+     cameras that cannot stream from go2rtc and snapshot priming. Discovery still records them.
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
      captcha (the log prints the `captcha_id`; solve it and set both, then restart).

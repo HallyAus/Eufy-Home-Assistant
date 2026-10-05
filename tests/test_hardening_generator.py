@@ -83,6 +83,23 @@ def test_no_camera_manifest_is_valid_empty_mapping(tmp_path):
     assert yaml.safe_load(paths[1].read_text())["streams"] == {}
 
 
+def test_disabled_camera_is_not_published_but_keeps_its_stream_identity(tmp_path):
+    paths = prepare(tmp_path, manifest(camera(0, "Broken", "A"), camera(1, "Working", "B")))
+    named = gen.generate(*paths, **AUTH, disabled_channels={0})
+    streams = yaml.safe_load(paths[1].read_text())["streams"]
+    registry = json.loads(paths[2].read_text())["names"]
+
+    assert [camera_data["channel"] for _, camera_data in named] == [1]
+    assert list(streams) == ["eufy_working"]
+    assert "eufy_broken" in registry.values()
+
+
+@pytest.mark.parametrize("value", ["0,,2", "-1", "256", "one", "1.0"])
+def test_invalid_disabled_channels_are_rejected(value):
+    with pytest.raises(ValueError):
+        gen.parse_disabled_channels(value)
+
+
 @pytest.mark.parametrize("value", [None, [], {}, {"cameras": {}}, manifest({}), manifest(camera(True)),
     manifest(camera(-1)), manifest(camera(256)), manifest(camera("zero")),
     manifest(camera(name=[])), manifest(camera(sn=[])), manifest(camera(status={})),
