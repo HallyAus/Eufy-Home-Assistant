@@ -72,7 +72,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: EufyNvrConfigEntry) -> b
         coordinator.async_prime_frames_forever(),
         f"{DOMAIN} snapshot primer",
     )
-    entry.async_on_unload(primer.cancel)
+
+    def _cancel_primer() -> None:
+        """Stop background priming without returning Task.cancel's boolean."""
+        primer.cancel()
+
+    entry.async_on_unload(_cancel_primer)
     return True
 
 

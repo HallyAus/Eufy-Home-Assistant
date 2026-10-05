@@ -21,6 +21,19 @@ STREAM_NAME = re.compile(r"eufy_[a-z0-9_]+\Z")
 STREAM_START_TIMEOUT = int(os.environ.get("EUFY_STREAM_START_TIMEOUT", "90"))
 
 
+def parse_disabled_channels(value: str) -> set[int]:
+    """Parse camera channels withheld from go2rtc and the snapshot primer."""
+    if not value.strip():
+        return set()
+    channels: set[int] = set()
+    for part in value.split(","):
+        token = part.strip()
+        if not token.isascii() or not token.isdecimal() or not 0 <= int(token) <= 255:
+            raise ValueError("disabled_channels must be comma-separated channel numbers from 0 to 255")
+        channels.add(int(token))
+    return channels
+
+
 def slug(name: str | None, channel: int) -> str:
     value = re.sub(r"[^a-z0-9]+", "_", (name or f"ch{channel}").lower()).strip("_")
     return "eufy_" + (value or f"ch{channel}")
@@ -208,6 +221,7 @@ def generate(
     manifest_path: Path, output_path: Path, registry_path: Path,
     *, username: str, password: str, api_port: int = 1984,
     rtsp_port: int = 8554, webrtc_port: int = 8555,
+    disabled_channels: set[int] | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     paths = [path.resolve() for path in (manifest_path, output_path, registry_path)]
     if len(set(paths)) != 3:
@@ -216,11 +230,15 @@ def generate(
     previous = validate_registry(json.loads(registry_path.read_text(encoding="utf-8"))) \
         if registry_path.exists() else {}
     named, names = assign_names(manifest, previous)
-    config = render_config(named, username, password, api_port, rtsp_port, webrtc_port)
+    enabled = [
+        (name, camera) for name, camera in named
+        if camera["channel"] not in (disabled_channels or set())
+    ]
+    config = render_config(enabled, username, password, api_port, rtsp_port, webrtc_port)
     registry = json.dumps({"version": 1, "names": names}, indent=2, sort_keys=True) + "\n"
     atomic_write(registry_path, registry)
     atomic_write(output_path, config)
-    return named
+    return enabled
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -237,9 +255,11 @@ def main(argv: list[str] | None = None) -> int:
         webrtc_port = int(os.environ.get("GO2RTC_WEBRTC_PORT", "8555"))
         username = os.environ.get("GO2RTC_USERNAME", "")
         password = os.environ.get("GO2RTC_PASSWORD", "")
+        disabled_channels = parse_disabled_channels(os.environ.get("EUFY_DISABLED_CHANNELS", ""))
         named = generate(manifest_path, output_path, registry_path,
                          username=username, password=password,
-                         api_port=api_port, rtsp_port=rtsp_port, webrtc_port=webrtc_port)
+                         api_port=api_port, rtsp_port=rtsp_port, webrtc_port=webrtc_port,
+                         disabled_channels=disabled_channels)
     except FileNotFoundError:
         print("gen_go2rtc: discovery file or output directory not found; run `python eufy_run.py --discover` first", file=sys.stderr)
         return 1

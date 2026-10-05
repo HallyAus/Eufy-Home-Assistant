@@ -69,6 +69,7 @@ options:
   adaptive_warm_seconds: 30
   token_refresh_hours: 6
   video_copy: false
+  disabled_channels: ""
   verification_code: ""
   go2rtc_username: "eufy"
   go2rtc_password: ""
@@ -91,6 +92,9 @@ schema:
   # video_copy: publish raw H.265 instead of transcoding to H.264 (lower CPU, but the browser live
   #   view shows the still thumbnail only). The adaptive warmer itself never adds a transcode.
   video_copy: bool?
+  # Optional comma-separated camera channel numbers (for example 0,2) to omit from go2rtc
+  # and snapshot priming when those cameras cannot stream. Discovery still finds them.
+  disabled_channels: str?
   station_sn: str?
   captcha_id: str?
   captcha_answer: str?
