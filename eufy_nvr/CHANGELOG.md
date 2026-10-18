@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Choose the startStream `sensor` per camera instead of always sending sensor 1. Single-lens PoE Cam E40 (T8P00) cameras only deliver video on sensor 0 and now use it automatically; other models keep sensor 1. A new optional `stream_sensors` setting (`channel:sensor` pairs) overrides any channel.
+
 ## 0.7.17
 
 - Anchor multi-channel signaling to channel 0, as validated by the reporter on a four-camera NVR.

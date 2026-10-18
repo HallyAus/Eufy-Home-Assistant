@@ -34,11 +34,17 @@ export EUFY_AUTH="${STATE_DIR}/auth.json"
 export EUFY_CAMERAS="${STATE_DIR}/cameras.json"
 export EUFY_STREAM_NAMES="${STATE_DIR}/stream_names.json"
 export EUFY_DISABLED_CHANNELS="$(bashio::config 'disabled_channels' '')"
+export EUFY_STREAM_SENSORS="$(bashio::config 'stream_sensors' '')"
 export EUFY_SESSION_LOCK="${STATE_DIR}/eufy-session.lock"
 export GO2RTC_USERNAME="$(bashio::config 'go2rtc_username')"
 export GO2RTC_PASSWORD="$(bashio::config 'go2rtc_password')"
 if [ "${#GO2RTC_PASSWORD}" -lt 16 ]; then
     bashio::log.fatal "go2rtc_password must contain at least 16 characters."
+    sleep 15
+    exit 1
+fi
+if ! python3 -c 'import os, stream_sensors; stream_sensors.parse_stream_sensors(os.environ["EUFY_STREAM_SENSORS"])'; then
+    bashio::log.fatal "stream_sensors must be comma-separated channel:sensor pairs such as 0:0,2:0 (sensor 0 or 1)."
     sleep 15
     exit 1
 fi
