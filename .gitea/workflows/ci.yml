@@ -82,6 +82,7 @@ jobs:
         node --check bridge/fetch_deps.js
         node --check bridge/get_auth.js
         python3 .gitea/scripts/test_oci_context.py
+        python3 .gitea/scripts/test_private_oci.py
   addon-build:
     needs:
     - test
@@ -120,6 +121,11 @@ jobs:
         test -s dist/eufy-addon-amd64.oci.tar
         sha256sum dist/eufy-addon-amd64.oci.tar > dist/eufy-addon-amd64.sha256
         git diff --exit-code
+    - name: Publish the verified candidate to the private personal Gitea registry
+      shell: bash
+      env:
+        PERSONAL_PACKAGE_TOKEN: ${{ secrets.PERSONAL_PACKAGE_TOKEN }}
+      run: python3 .gitea/scripts/publish_private_oci.py
     - name: Retain private OCI candidate and exact-source proof
       uses: https://github.com/actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5
       with:
@@ -129,5 +135,6 @@ jobs:
           dist/eufy-addon-amd64.sha256
           dist/source-provenance.json
           dist/build-metadata.json
+          dist/private-registry-publication.json
         if-no-files-found: error
         retention-days: 3

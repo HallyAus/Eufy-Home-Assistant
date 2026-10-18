@@ -21,8 +21,16 @@ At future releases, verify that immutable bridge source and its matching
 primary/recovery objects before updating its pin. Never silently switch a
 public user's build to a private LAN URL.
 
-This migration verifies builds only. No Eufy login, camera stream, account
-write, Home Assistant installation/restart or registry push is a CI test.
+After the complete original gates and exact-source OCI checks, CI may publish
+only immutable source-SHA candidates to the private VM300 package registry.
+Its dedicated PERSONAL_PACKAGE_TOKEN is repository-only (package write/user
+read), and the publisher must verify the private owner, source, all blob hashes,
+repository link and anonymous denial. It never moves latest or public tags.
+The server token has no automatic expiry; rotate/revoke it before the CI use
+deadline16January2027UTC. Never infer its value from a masked secret field.
+
+No Eufy login, camera stream, account write, Home Assistant installation/restart
+or public registry/release publication is a CI test.
 Never record real camera/account credentials, identifiers, media or household
 configuration in source, tests, logs or artifacts. Existing public source and
 release consumers must remain functional before retiring any working route.
