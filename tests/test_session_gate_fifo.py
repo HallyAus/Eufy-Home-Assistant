@@ -89,3 +89,26 @@ def test_waiting_producer_logs_its_queue_position(tmp_path, capsys):
 
     asyncio.run(scenario())
     assert "channel 3 waiting for the NVR session, queue position 1/1" in capsys.readouterr().err
+
+
+def test_ticket_from_a_reused_pid_is_dropped(tmp_path):
+    """A ticket whose PID is alive but started at a different time is stale."""
+    import os
+
+    own_start = supervisor._process_start(os.getpid())
+    if own_start == "0":
+        pytest.skip("needs /proc to read process start times")
+
+    async def scenario():
+        queue_dir = tmp_path / "session.lock.queue"
+        queue_dir.mkdir()
+        # Older than any new ticket, live PID, wrong start time: left by a
+        # process that has gone, its PID since reused.
+        stale = queue_dir / f"{0:020d}-{os.getpid()}-{int(own_start) + 1}-dead.ticket"
+        stale.write_text("old producer")
+        gate = _gate(tmp_path, "fresh")
+        assert await asyncio.wait_for(gate.acquire(asyncio.Event()), timeout=2)
+        gate.release()
+        assert not stale.exists()
+
+    asyncio.run(scenario())

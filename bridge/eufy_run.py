@@ -90,6 +90,19 @@ def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
         state.authorization_rejection = True
 
 
+def _process_start(pid: int) -> str:
+    """Kernel start time of ``pid`` (/proc stat field 22), or "0" if unknown.
+
+    Paired with the PID it tells a reused PID apart from the original process.
+    """
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        # comm (field 2) may contain spaces; fields after it are space separated.
+        return stat.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return "0"
+
+
 class SessionGate:
     """Cross-process exclusive gate for the NVR's single live session.
 
@@ -116,13 +129,23 @@ class SessionGate:
         tickets = []
         for ticket in sorted(self.queue_dir.glob("*.ticket")):
             try:
-                pid = int(ticket.name.split("-")[1])
-                os.kill(pid, 0)
-            except ProcessLookupError:
+                _, pid_text, start, _ = ticket.name.split("-", 3)
+                pid = int(pid_text)
+            except ValueError:
                 ticket.unlink(missing_ok=True)
                 continue
-            except (ValueError, IndexError, PermissionError):
-                pass
+            try:
+                os.kill(pid, 0)
+                # A PID reused after a crash or add-on restart is not our waiter.
+                live_start = _process_start(pid)
+                stale = start != "0" and live_start != "0" and live_start != start
+            except ProcessLookupError:
+                stale = True
+            except PermissionError:
+                stale = False
+            if stale:
+                ticket.unlink(missing_ok=True)
+                continue
             tickets.append(ticket)
         return tickets
 
@@ -135,16 +158,18 @@ class SessionGate:
             return True
         import fcntl
 
-        self.queue_dir.mkdir(parents=True, exist_ok=True)
+        # Monotonic, so a wall-clock step cannot reorder waiters.
+        pid = os.getpid()
         ticket = self.queue_dir / (
-            f"{time.time_ns():020d}-{os.getpid()}-{id(self):x}.ticket"
+            f"{time.monotonic_ns():020d}-{pid}-{_process_start(pid)}-{id(self):x}.ticket"
         )
-        ticket.write_text(self.label)
         acquired = False
         last_preempt_at = 0.0
         last_log_at = 0.0
         started = time.monotonic()
         try:
+            self.queue_dir.mkdir(parents=True, exist_ok=True)
+            ticket.write_text(self.label)
             while not stop_event.is_set():
                 queue = self._queue()
                 if not queue or queue[0] == ticket:
