@@ -91,16 +91,40 @@ def inspect_log_line(line: str, state: SessionState, discovery: bool) -> None:
 
 
 class SessionGate:
-    """Cross-process exclusive gate for the NVR's single live session."""
+    """Cross-process exclusive gate for the NVR's single live session.
+
+    Producers are separate processes (one per go2rtc exec), so waiters queue
+    as ticket files beside the lock. Only the oldest live ticket may take the
+    flock, which serves producers in arrival order instead of letting whichever
+    poll lands first win (#25).
+    """
 
     def __init__(
         self,
         path: Path = SESSION_LOCK_PATH,
         preempt_path: Path = SESSION_PREEMPT_PATH,
+        label: str | None = None,
     ) -> None:
         self.path = path
         self.preempt_path = preempt_path
+        self.queue_dir = path.with_name(path.name + ".queue")
+        self.label = label or f"pid {os.getpid()}"
         self.handle = None
+
+    def _queue(self) -> list[Path]:
+        """Live tickets, oldest first; tickets of dead processes are dropped."""
+        tickets = []
+        for ticket in sorted(self.queue_dir.glob("*.ticket")):
+            try:
+                pid = int(ticket.name.split("-")[1])
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                ticket.unlink(missing_ok=True)
+                continue
+            except (ValueError, IndexError, PermissionError):
+                pass
+            tickets.append(ticket)
+        return tickets
 
     async def acquire(self, stop_event: asyncio.Event) -> bool:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,25 +135,52 @@ class SessionGate:
             return True
         import fcntl
 
+        self.queue_dir.mkdir(parents=True, exist_ok=True)
+        ticket = self.queue_dir / (
+            f"{time.time_ns():020d}-{os.getpid()}-{id(self):x}.ticket"
+        )
+        ticket.write_text(self.label)
+        acquired = False
         last_preempt_at = 0.0
-        while not stop_event.is_set():
-            try:
-                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                try:
-                    self.preempt_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-                return True
-            except BlockingIOError:
+        last_log_at = 0.0
+        started = time.monotonic()
+        try:
+            while not stop_event.is_set():
+                queue = self._queue()
+                if not queue or queue[0] == ticket:
+                    try:
+                        fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        acquired = True
+                        try:
+                            self.preempt_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        return True
+                    except BlockingIOError:
+                        pass
                 now = time.monotonic()
                 if now - last_preempt_at >= 1.0:
                     self.request_preempt()
                     last_preempt_at = now
+                if now - last_log_at >= 5.0:
+                    position = queue.index(ticket) + 1 if ticket in queue else 1
+                    print(
+                        f"eufy supervisor: {self.label} waiting for the NVR session, "
+                        f"queue position {position}/{max(len(queue), 1)} "
+                        f"({now - started:.1f}s)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    last_log_at = now
                 try:
                     await asyncio.wait_for(stop_event.wait(), timeout=SESSION_LOCK_POLL)
                 except asyncio.TimeoutError:
                     pass
-        self.release()
+        finally:
+            # Covers acquisition, a viewer leaving (stop_event) and cancellation.
+            ticket.unlink(missing_ok=True)
+            if not acquired:
+                self.release()
         return False
 
     def request_preempt(self) -> None:
@@ -288,7 +339,9 @@ async def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     discovery = "--discover" in args
     stop_event = asyncio.Event()
-    gate = SessionGate()
+    gate = SessionGate(
+        label=f"channel {args[0]}" if args and not args[0].startswith("-") else None
+    )
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
