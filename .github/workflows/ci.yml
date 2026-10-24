@@ -49,5 +49,7 @@ jobs:
       - name: Build amd64 Home Assistant add-on image
         run: |
           docker build \
+            --tag eufy-nvr:ci \
             --file eufy_nvr/Dockerfile \
             eufy_nvr
+          test "$(docker run --rm --entrypoint node eufy-nvr:ci --version)" = "v22.23.4"
