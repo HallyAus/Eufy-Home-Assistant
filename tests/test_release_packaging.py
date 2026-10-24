@@ -49,6 +49,14 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertNotIn('REPO_REF="main"', dockerfile)
         self.assertNotIn("releases/latest", dockerfile)
 
+    def test_addon_uses_patched_node_runtime(self):
+        dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
+        self.assertIn("FROM node:22.23.4-bookworm-slim AS patched-node", dockerfile)
+        self.assertIn("COPY --from=patched-node /usr/local/bin/node /usr/local/bin/node", dockerfile)
+        self.assertIn('test "$(node --version)" = "v22.23.4"', dockerfile)
+        self.assertNotRegex(dockerfile, r"(?m)^\s+nodejs\s*$")
+        self.assertNotRegex(dockerfile, r"(?m)^\s+npm\s*$")
+
     def test_addon_recovers_after_a_host_restart(self):
         config = (ROOT / "eufy_nvr/config.yaml").read_text()
         self.assertIn("boot: auto", config)
