@@ -1,5 +1,9 @@
 ARG BUILD_FROM="ghcr.io/home-assistant/base-debian:bookworm@sha256:60cd882d5200157082e568a0b775cca0d9cb5704452ada3cf6f206c4dd6d83c5"
+# Use the official patched Node binary; Debian Bookworm's nodejs package is older.
+FROM node:22.23.4-bookworm-slim AS patched-node
+
 FROM ${BUILD_FROM}
+COPY --from=patched-node /usr/local/bin/node /usr/local/bin/node
 
 ARG GO2RTC_VERSION="v1.9.14"
 ARG GO2RTC_SHA256_AMD64="32d616af226bd731678ffde328b94cfb94e30339bfefc469cfb76323144615a6"
@@ -25,8 +29,6 @@ RUN \
         python3-pip \
         python3-dev \
         python3-venv \
-        nodejs \
-        npm \
         ffmpeg \
         build-essential \
         pkg-config \
@@ -47,6 +49,9 @@ RUN \
         git \
         xz-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# Fail the build if the copied runtime is not the patched security release.
+RUN test "$(node --version)" = "v22.23.4"
 
 RUN if [ ! -e /usr/bin/python ]; then ln -s /usr/bin/python3 /usr/bin/python; fi
 
