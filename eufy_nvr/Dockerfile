@@ -1,6 +1,6 @@
 ARG BUILD_FROM="ghcr.io/home-assistant/base-debian:bookworm@sha256:60cd882d5200157082e568a0b775cca0d9cb5704452ada3cf6f206c4dd6d83c5"
 # Use the official patched Node binary; Debian Bookworm's nodejs package is older.
-FROM node:22.23.4-bookworm-slim AS patched-node
+FROM node:26.12.1-bookworm-slim AS patched-node
 
 FROM ${BUILD_FROM}
 COPY --from=patched-node /usr/local/bin/node /usr/local/bin/node
