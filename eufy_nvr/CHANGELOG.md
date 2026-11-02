@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.18-rc.1
+
+- Package the FIFO session gate and queue-position logging from #27, along with
+  the current pinned bridge dependency updates.
+- This is a test candidate. Queued streams can still outlast Home Assistant's
+  timeout and abandoned producers may later acquire the NVR session. Camera
+  switching and multi-camera dashboards are not yet confirmed fixed.
+- Earlier hardware feedback tested a locally modified build, not this candidate.
+
 ## 0.7.17
 
 - Anchor multi-channel signaling to channel 0, as validated by the reporter on a four-camera NVR.
