@@ -1,13 +1,13 @@
 aiortc==1.15.0
-aioice==0.10.2
+aioice==0.13.0
 av==17.1.0
 google-crc32c==1.9.0
 pyee==13.0.1
 pylibsrtp==1.0.0
 pyOpenSSL==26.4.0
-dnspython==2.9.0
+dnspython==2.9.2
 ifaddr==0.2.0
-websockets==17.3
+websockets==17.4
 aiohttp==3.14.5
 aiohappyeyeballs==2.7.1
 aiosignal==1.4.0
@@ -17,7 +17,7 @@ multidict==6.9.1
 propcache==0.5.4
 yarl==1.25.1
 idna==3.20
-pycryptodome==4.1.0
+pycryptodome==4.3.0
 cryptography==50.0.2
 cffi==2.1.1
 pycparser==3.12
