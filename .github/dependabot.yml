@@ -15,6 +15,11 @@ updates:
         update-types:
           - minor
           - patch
+    ignore:
+      # The add-on deliberately runs the patched Node LTS line that
+      # tests/test_release_packaging.py pins; change Node majors as a planned runtime move.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
@@ -24,6 +29,10 @@ updates:
       time: "09:00"
       timezone: "Australia/Sydney"
     open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: "pip"
     directory: "/bridge"
