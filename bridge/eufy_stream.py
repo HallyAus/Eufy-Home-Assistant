@@ -15,6 +15,7 @@ import asyncio, json, time, uuid, os, sys, hashlib, re, base64, struct, ipaddres
 import aiohttp
 import websockets
 import eufy_cloud as ec
+import stream_sensors
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration
 from aiortc.sdp import candidate_from_sdp
 import logging
@@ -167,6 +168,14 @@ CAPTURE_DEBUG = os.environ.get("EUFY_CAPTURE_DEBUG") == "1"
 # discovered camera list survives a container restart/rebuild and gen_go2rtc.py
 # reads it from the exact same place; default to the bridge dir for standalone runs.
 CAMERAS_JSON = os.environ.get("EUFY_CAMERAS", os.path.join(ROOT, "cameras.json"))
+# Per-camera startStream sensor: single-lens PoE Cam E40 (T8P00) only streams on
+# sensor 0; EUFY_STREAM_SENSORS ("channel:sensor,...") overrides any channel.
+try:
+    _SENSOR_OVERRIDES = stream_sensors.parse_stream_sensors(os.environ.get("EUFY_STREAM_SENSORS", ""))
+except ValueError as _err:
+    raise SystemExit(str(_err))
+STREAM_SENSORS = stream_sensors.sensors_for_channels(
+    CHANNELS, stream_sensors.load_serials(CAMERAS_JSON), _SENSOR_OVERRIDES)
 
 STDOUT_MODE = os.environ.get("EUFY_STDOUT") == "1"   # write clean Annex-B to stdout (for go2rtc/ffmpeg exec source)
 def now(): return int(time.time())
@@ -189,9 +198,12 @@ def build_openlive(user_id, channels):
     h[14] = 0; h[15] = 2                          # is_response, dev_type (cloud=2)
     return bytes(h) + payload
 
-def build_startstream(user_id, channels, stream_id=1):
+def build_startstream(user_id, channels, stream_id=1, sensors=None):
     # cmd 1003 (ic / startStream) — the ACTUAL live-video trigger (cmd 1103 is only a param query).
-    chn_list = [{"index": i, "chn": c, "sensor": 1} for i, c in enumerate(channels)]
+    # sensors maps channel -> sensor index; unlisted channels keep the historical sensor 1.
+    sensors = sensors or {}
+    chn_list = [{"index": i, "chn": c, "sensor": sensors.get(c, stream_sensors.DEFAULT_SENSOR)}
+                for i, c in enumerate(channels)]
     payload = json.dumps({
         "account_id": user_id, "cmd": 1003,
         "payload": {"ClientOS": "WEB", "entrytype": 1, "camera_type": 0, "streamtype": 2,
@@ -547,8 +559,8 @@ async def main():
         # The NVR acknowledges openLive in tens of milliseconds. A short guard
         # is sufficient and keeps cold starts inside HA's image timeout.
         await asyncio.sleep(0.15)
-        ss = build_startstream(USER_ID, CHANNELS, stream_id=1)
-        log(f"-> startStream (1003) len={len(ss)} streamId=1  [THE video trigger]")
+        ss = build_startstream(USER_ID, CHANNELS, stream_id=1, sensors=STREAM_SENSORS)
+        log(f"-> startStream (1003) len={len(ss)} streamId=1 sensors={STREAM_SENSORS}  [THE video trigger]")
         oracle.push_send(1, ss)
 
     async def stats_loop():

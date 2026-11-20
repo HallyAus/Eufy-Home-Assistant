@@ -40,6 +40,9 @@ cloud; the video itself is pulled LAN-direct from the NVR.
      (default `30`; a different camera preempts it; set `0` to disable)
    - *(optional)* `disabled_channels` -> comma-separated channel numbers such as `0,2` to omit
      cameras that cannot stream from go2rtc and snapshot priming. Discovery still records them.
+   - *(optional)* `stream_sensors` -> comma-separated `channel:sensor` pairs such as `0:0,2:0` that set the
+     startStream sensor index per camera. PoE Cam E40 (T8P00) uses sensor 0 automatically and other cameras
+     keep sensor 1; try `channel:0` for a camera whose session opens but never receives video.
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
      captcha (the log prints the `captcha_id`; solve it and set both, then restart).

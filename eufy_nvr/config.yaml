@@ -70,6 +70,7 @@ options:
   token_refresh_hours: 6
   video_copy: false
   disabled_channels: ""
+  stream_sensors: ""
   verification_code: ""
   go2rtc_username: "eufy"
   go2rtc_password: ""
@@ -95,6 +96,9 @@ schema:
   # Optional comma-separated camera channel numbers (for example 0,2) to omit from go2rtc
   # and snapshot priming when those cameras cannot stream. Discovery still finds them.
   disabled_channels: str?
+  # Optional channel:sensor pairs (for example 0:0,2:0) for the startStream sensor index.
+  # PoE Cam E40 (T8P00) uses sensor 0 automatically; other cameras default to sensor 1.
+  stream_sensors: str?
   station_sn: str?
   captcha_id: str?
   captcha_answer: str?
