@@ -17,9 +17,18 @@ async def test_snapshot_primer_unload_callback_returns_none_and_cancels_task():
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "async_setup_entry"
     )
 
+    class Previews:
+        started = False
+
+        async def async_load(self):
+            pass
+
+        def async_start(self, entry):
+            self.started = True
+
     class Coordinator:
         def __init__(self, hass, entry):
-            pass
+            self.previews = Previews()
 
         async def async_config_entry_first_refresh(self):
             pass

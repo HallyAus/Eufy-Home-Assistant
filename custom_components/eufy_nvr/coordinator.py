@@ -33,6 +33,7 @@ from .const import (
     UPDATE_INTERVAL,
 )
 from .go2rtc_api import Go2RtcClient, Go2RtcError
+from .previews import PreviewManager
 from .snapshot import SnapshotCache
 
 _LOGGER = logging.getLogger(__name__)
@@ -66,6 +67,8 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             timeout=FRAME_INITIAL_TIMEOUT,
         )
         self._primed_streams: set[str] = set()
+        # Stored previews (passive grabs + idle refresh); see previews.py.
+        self.previews = PreviewManager(hass, self._client, entry.entry_id)
 
         super().__init__(
             hass,
@@ -119,6 +122,9 @@ class EufyNvrCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Seed missing cameras sequentially so dashboards have a fallback."""
         current = set(self.data or {})
         self._primed_streams.intersection_update(current)
+        # A camera with a stored preview needs no seed: priming opens an NVR
+        # session that competes with live viewing on the single-session NVR.
+        self._primed_streams.update(s for s in current if self.previews.has_preview(s))
         for stream in sorted(current - self._primed_streams):
             try:
                 await self.async_get_frame(stream)
