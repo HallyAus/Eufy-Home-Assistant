@@ -34,6 +34,53 @@ def parse_disabled_channels(value: str) -> set[int]:
     return channels
 
 
+GROUP_NAME = re.compile(r"[a-z0-9][a-z0-9_]{0,31}\Z")
+
+
+def parse_extra_lenses(value: str) -> dict[int, list[int]]:
+    """Parse "0:0,1:0" (channel:sensor) into extra per-lens streams per channel."""
+    lenses: dict[int, list[int]] = {}
+    for part in value.split(","):
+        token = part.strip()
+        if not token:
+            continue
+        channel, _, sensor = token.partition(":")
+        if not (channel.isascii() and channel.isdecimal() and sensor.isascii() and sensor.isdecimal()) \
+                or not 0 <= int(channel) <= 255 or not 0 <= int(sensor) <= 7:
+            raise ValueError("extra_lenses must look like 0:0,1:0 (channel 0-255 : sensor 0-7)")
+        if int(sensor) not in lenses.setdefault(int(channel), []):
+            lenses[int(channel)].append(int(sensor))
+    return lenses
+
+
+def parse_camera_groups(value: str) -> list[tuple[str, list[tuple[int, int, int]]]]:
+    """Parse "front=0-0-1,1-1-1;back=0-2-1" into (name, [(slot, channel, sensor)])."""
+    groups: list[tuple[str, list[tuple[int, int, int]]]] = []
+    names: set[str] = set()
+    for part in value.split(";"):
+        token = part.strip()
+        if not token:
+            continue
+        name, _, spec = token.partition("=")
+        name = name.strip()
+        if not GROUP_NAME.match(name) or name in names:
+            raise ValueError("camera group names must be unique, lowercase letters, digits or _")
+        tiles: list[tuple[int, int, int]] = []
+        for item in spec.split(","):
+            fields = item.strip().split("-")
+            if len(fields) != 3 or not all(f.isascii() and f.isdecimal() for f in fields):
+                raise ValueError(f"camera group {name}: tiles must look like slot-channel-sensor")
+            slot, channel, sensor = (int(f) for f in fields)
+            if not (0 <= slot <= 8 and 0 <= channel <= 255 and 0 <= sensor <= 7):
+                raise ValueError(f"camera group {name}: slot 0-8, channel 0-255, sensor 0-7")
+            tiles.append((slot, channel, sensor))
+        if not tiles or len({slot for slot, _c, _s in tiles}) != len(tiles):
+            raise ValueError(f"camera group {name}: needs 1-9 tiles with unique slots")
+        names.add(name)
+        groups.append((name, tiles))
+    return groups
+
+
 def slug(name: str | None, channel: int) -> str:
     value = re.sub(r"[^a-z0-9]+", "_", (name or f"ch{channel}").lower()).strip("_")
     return "eufy_" + (value or f"ch{channel}")
@@ -148,6 +195,8 @@ def render_config(
     api_port: int = 1984,
     rtsp_port: int = 8554,
     webrtc_port: int = 8555,
+    *, extra_lenses: dict[int, list[int]] | None = None,
+    camera_groups: list[tuple[str, list[tuple[int, int, int]]]] | None = None,
 ) -> str:
     ports = [validate_port(port) for port in (api_port, rtsp_port, webrtc_port)]
     if len(set(ports)) != 3:
@@ -170,6 +219,20 @@ def render_config(
             f"#starttimeout={STREAM_START_TIMEOUT}#killsignal=2#killtimeout=5"
         )
         lines.append(f"  {name}: {json.dumps(command)}")
+        for sensor in (extra_lenses or {}).get(camera["channel"], ()):
+            command = (
+                f"exec:python eufy_run.py {camera['channel']} --sensor {sensor} --rtsp {{output}}"
+                f"#starttimeout={STREAM_START_TIMEOUT}#killsignal=2#killtimeout=5"
+            )
+            lines.append(f"  {name}_lens{sensor}: {json.dumps(command)}")
+    if online:
+        for group, tiles in camera_groups or ():
+            spec = ",".join(f"{slot}-{channel}-{sensor}" for slot, channel, sensor in tiles)
+            command = (
+                f"exec:python eufy_run.py g:{spec} --rtsp {{output}}"
+                f"#starttimeout={STREAM_START_TIMEOUT}#killsignal=2#killtimeout=5"
+            )
+            lines.append(f"  eufy_group_{group}: {json.dumps(command)}")
     lines.extend([
         "",
         "exec:",
@@ -222,6 +285,8 @@ def generate(
     *, username: str, password: str, api_port: int = 1984,
     rtsp_port: int = 8554, webrtc_port: int = 8555,
     disabled_channels: set[int] | None = None,
+    extra_lenses: dict[int, list[int]] | None = None,
+    camera_groups: list[tuple[str, list[tuple[int, int, int]]]] | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     paths = [path.resolve() for path in (manifest_path, output_path, registry_path)]
     if len(set(paths)) != 3:
@@ -234,7 +299,8 @@ def generate(
         (name, camera) for name, camera in named
         if camera["channel"] not in (disabled_channels or set())
     ]
-    config = render_config(enabled, username, password, api_port, rtsp_port, webrtc_port)
+    config = render_config(enabled, username, password, api_port, rtsp_port, webrtc_port,
+                           extra_lenses=extra_lenses, camera_groups=camera_groups)
     registry = json.dumps({"version": 1, "names": names}, indent=2, sort_keys=True) + "\n"
     atomic_write(registry_path, registry)
     atomic_write(output_path, config)
@@ -256,10 +322,13 @@ def main(argv: list[str] | None = None) -> int:
         username = os.environ.get("GO2RTC_USERNAME", "")
         password = os.environ.get("GO2RTC_PASSWORD", "")
         disabled_channels = parse_disabled_channels(os.environ.get("EUFY_DISABLED_CHANNELS", ""))
+        extra_lenses = parse_extra_lenses(os.environ.get("EUFY_EXTRA_LENSES", ""))
+        camera_groups = parse_camera_groups(os.environ.get("EUFY_CAMERA_GROUPS", ""))
         named = generate(manifest_path, output_path, registry_path,
                          username=username, password=password,
                          api_port=api_port, rtsp_port=rtsp_port, webrtc_port=webrtc_port,
-                         disabled_channels=disabled_channels)
+                         disabled_channels=disabled_channels,
+                         extra_lenses=extra_lenses, camera_groups=camera_groups)
     except FileNotFoundError:
         print("gen_go2rtc: discovery file or output directory not found; run `python eufy_run.py --discover` first", file=sys.stderr)
         return 1
