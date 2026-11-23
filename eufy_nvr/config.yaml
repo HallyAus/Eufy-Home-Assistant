@@ -69,6 +69,8 @@ options:
   adaptive_warm_seconds: 30
   token_refresh_hours: 6
   video_copy: false
+  extra_lenses: ""
+  camera_groups: ""
   disabled_channels: ""
   verification_code: ""
   go2rtc_username: "eufy"
@@ -92,6 +94,12 @@ schema:
   # video_copy: publish raw H.265 instead of transcoding to H.264 (lower CPU, but the browser live
   #   view shows the still thumbnail only). The adaptive warmer itself never adds a transcode.
   video_copy: bool?
+  # extra_lenses: extra per-lens streams for dual-lens cameras, as channel:sensor pairs
+  #   (for example 0:0,1:0 adds the fixed lens of S4 Max PoE cameras on channels 0 and 1).
+  extra_lenses: str?
+  # camera_groups: NVR-side multi-view streams that show several cameras live in one video.
+  #   Format name=slot-channel-sensor,...;name2=... (slots 0-8 on a 3x3 grid, row-major).
+  camera_groups: str?
   # Optional comma-separated camera channel numbers (for example 0,2) to omit from go2rtc
   # and snapshot priming when those cameras cannot stream. Discovery still finds them.
   disabled_channels: str?

@@ -132,7 +132,22 @@ def _decrypt_user_id():
 USER_ID = _decrypt_user_id()
 DISCOVER = "--discover" in sys.argv   # connect, run cmd 9100 -> list NVR ip + cameras (ch,name), write cameras.json, exit
 _carg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "0"
-CHANNELS = [0, 1, 2, 3] if _carg == "all" else [int(x) for x in _carg.split(",")]
+# "g:<slot>-<channel>-<sensor>,..." requests one NVR-side multi-view (the official
+# web viewer's stitch_mode 3): the NVR composites the cameras into a single video on
+# a 3x3 grid, each tile placed by its slot (0-8, row-major).
+GROUP = None
+if _carg.startswith("g:"):
+    try:
+        GROUP = [tuple(int(v) for v in item.split("-")) for item in _carg[2:].split(",") if item]
+    except ValueError:
+        raise SystemExit("group spec must look like g:0-0-1,1-1-1 (slot-channel-sensor)")
+    if (not GROUP or len(GROUP) > 9 or any(len(t) != 3 for t in GROUP)
+            or len({t[0] for t in GROUP}) != len(GROUP)
+            or not all(0 <= sl <= 8 and 0 <= ch <= 255 and 0 <= se <= 7 for sl, ch, se in GROUP)):
+        raise SystemExit("group spec needs 1-9 unique slots 0-8, channels 0-255, sensors 0-7")
+    CHANNELS = list(dict.fromkeys(ch for _slot, ch, _sensor in GROUP))
+else:
+    CHANNELS = [0, 1, 2, 3] if _carg == "all" else [int(x) for x in _carg.split(",")]
 
 # Keep action3/control signaling anchored to the NVR primary channel (0).
 # Requested camera selection remains in CHANNELS/openLive/startStream.
@@ -146,6 +161,18 @@ if "--rtsp" in sys.argv:
     RTSP_URL = sys.argv[sys.argv.index("--rtsp") + 1]
 STREAM_MODE = bool(RTSP_URL) or os.environ.get("EUFY_STDOUT") == "1"   # run indefinitely, no frame-count stop
 _rest = [a for a in sys.argv[2:] if a not in ("--rtsp", RTSP_URL)]
+# Dual-lens cameras (for example S4 Max PoE): "--sensor N" selects the lens for this
+# stream. Sensor 1 stays the default; on the S4 Max it is the PTZ lens and 0 the fixed lens.
+SENSOR = 1
+if "--sensor" in sys.argv:
+    _i = sys.argv.index("--sensor")
+    try:
+        SENSOR = int(sys.argv[_i + 1])
+    except (IndexError, ValueError):
+        raise SystemExit("--sensor needs a number")
+    if not 0 <= SENSOR <= 7:
+        raise SystemExit("--sensor must be between 0 and 7")
+    _rest = [a for a in _rest if a not in sys.argv[_i:_i + 2]]
 RUN_SECS = int(_rest[0]) if _rest and _rest[0].isdigit() else (10**9 if STREAM_MODE else 70)
 NODE = _bin("node")
 ORACLE = os.path.join(ROOT, "sctp_oracle.js")
@@ -191,12 +218,24 @@ def build_openlive(user_id, channels):
 
 def build_startstream(user_id, channels, stream_id=1):
     # cmd 1003 (ic / startStream) — the ACTUAL live-video trigger (cmd 1103 is only a param query).
-    chn_list = [{"index": i, "chn": c, "sensor": 1} for i, c in enumerate(channels)]
-    payload = json.dumps({
-        "account_id": user_id, "cmd": 1003,
-        "payload": {"ClientOS": "WEB", "entrytype": 1, "camera_type": 0, "streamtype": 2,
-                    "key": "", "msg_id": "", "audio_chn": -1, "stitch_mode": 1, "chn_list": chn_list},
-    }, separators=(",", ":")).encode()
+    if GROUP:
+        # Same request the official web viewer sends for its multi-camera grid.
+        payload = json.dumps({
+            "account_id": user_id, "cmd": 1003,
+            "payload": {"ClientOS": "WEB", "entrytype": 0, "camera_type": 0, "key": "",
+                        "msg_id": 116, "audio_chn": -1, "streamtype": 2, "stitch_mode": 3,
+                        "chn_list": [{"index": slot, "chn": ch, "sensor": sensor, "isUps": 1,
+                                      "isClicked": True} for slot, ch, sensor in GROUP],
+                        "pip_cord": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
+                        "station_video_type": 6, "play_id": stream_id},
+        }, separators=(",", ":")).encode()
+    else:
+        chn_list = [{"index": i, "chn": c, "sensor": SENSOR} for i, c in enumerate(channels)]
+        payload = json.dumps({
+            "account_id": user_id, "cmd": 1003,
+            "payload": {"ClientOS": "WEB", "entrytype": 1, "camera_type": 0, "streamtype": 2,
+                        "key": "", "msg_id": "", "audio_chn": -1, "stitch_mode": 1, "chn_list": chn_list},
+        }, separators=(",", ":")).encode()
     h = bytearray(16)
     h[0:4] = b"XZYH"
     struct.pack_into("<H", h, 4, 1350)
@@ -422,6 +461,12 @@ async def main():
             vcodec = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
                       "-pix_fmt", "yuv420p", "-g", "12", "-keyint_min", "12", "-sc_threshold", "0"]
             _codec_label = "H.264 (transcoded)"
+            if GROUP:
+                # The NVR always sends the full 3x3 grid; keep only the rows/columns in use.
+                cols = max(slot % 3 for slot, _ch, _sensor in GROUP) + 1
+                rows = max(slot // 3 for slot, _ch, _sensor in GROUP) + 1
+                if (cols, rows) != (3, 3):
+                    vcodec = ["-vf", f"crop=iw*{cols}/3:ih*{rows}/3:0:0"] + vcodec
         ffmpeg_proc = await asyncio.create_subprocess_exec(
             FFMPEG, "-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer",
             # The input format is known, so probing only delays go2rtc publication.

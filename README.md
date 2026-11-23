@@ -133,6 +133,10 @@ Runs everything on your HA host; no always-on PC and no token paste.
      another camera preempts it immediately; set `0` to disable)
    - *(optional)* `disabled_channels` — comma-separated channel numbers such as `0,2` to omit cameras
      that cannot stream from go2rtc and snapshot priming; discovery still records them. Restart after changing it.
+   - *(optional)* `extra_lenses` — `channel:sensor` pairs that add the second lens of dual-lens cameras
+     (S4 Max PoE: `0` is the fixed lens, `1` the default PTZ lens), for example `0:0,1:0`
+   - *(optional)* `camera_groups` — several cameras live in one stream, composited by the NVR, for example
+     `front=0-0-1,1-1-1;back=0-2-1,1-3-1` (`slot-channel-sensor`, slots `0`-`8` on a 3x3 grid)
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
    - *(optional)* `verification_code` — when the log says mailbox verification is required, enter the
