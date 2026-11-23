@@ -110,3 +110,32 @@ def test_session_gate_emits_a_preemption_hint(tmp_path):
     gate = supervisor.SessionGate(tmp_path / "session.lock", marker)
     gate.request_preempt()
     assert marker.is_file()
+
+
+def test_turn_and_busy_retry_limits_are_bounded():
+    assert 2 <= supervisor.TURN_PENDING_TIMEOUT <= 60
+    assert 0 <= supervisor.BUSY_RETRIES <= 3
+    assert 0.5 <= supervisor.BUSY_RETRY_DELAY <= 15
+
+
+def test_call_stuck_at_turn_status_100_is_restarted(tmp_path, monkeypatch):
+    """A call that never leaves scall/turn status 100 is abandoned early."""
+    import asyncio
+
+    engine = tmp_path / "fake_engine.py"
+    engine.write_text(
+        "import sys, time\n"
+        "print('[12:00:00] scall/turn status 100', file=sys.stderr, flush=True)\n"
+        "time.sleep(30)\n"
+    )
+    monkeypatch.setattr(supervisor, "ENGINE", engine)
+    monkeypatch.setattr(supervisor, "TURN_PENDING_TIMEOUT", 2.0)
+
+    started = time.monotonic()
+    _rc, reason, state_ = asyncio.run(supervisor.run_attempt([], False))
+    elapsed = time.monotonic() - started
+
+    assert reason == "signaling_timeout"
+    assert state_.turn_pending is True
+    assert state_.sdp_seen is False
+    assert elapsed < supervisor.SIGNAL_TIMEOUT

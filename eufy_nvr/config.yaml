@@ -71,6 +71,7 @@ options:
   video_copy: false
   disabled_channels: ""
   stream_sensors: ""
+  ice_allow: ""
   verification_code: ""
   go2rtc_username: "eufy"
   go2rtc_password: ""
@@ -99,6 +100,9 @@ schema:
   # Optional channel:sensor pairs (for example 0:0,2:0) for the startStream sensor index.
   # PoE Cam E40 (T8P00) uses sensor 0 automatically; other cameras default to sensor 1.
   stream_sensors: str?
+  # Optional comma-separated IPv4 prefixes (for example 192.168.1.) for the WebRTC candidates
+  # offered to the NVR. Leave blank to offer every host candidate.
+  ice_allow: str?
   station_sn: str?
   captcha_id: str?
   captcha_answer: str?

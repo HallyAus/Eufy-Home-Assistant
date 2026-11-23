@@ -3,6 +3,13 @@
 ## Unreleased
 
 - Choose the startStream `sensor` per camera instead of always sending sensor 1. Single-lens PoE Cam E40 (T8P00) cameras only deliver video on sensor 0 and now use it automatically; other models keep sensor 1. A new optional `stream_sensors` setting (`channel:sensor` pairs) overrides any channel.
+- Finish live-session teardown (closeLive, then peer close) even when ffmpeg's exit and go2rtc's SIGINT
+  cancel the engine twice. An aborted teardown left the NVR holding the call for about 60 seconds and
+  answering 486 to every camera. The supervisor now allows 5 seconds instead of 3 before escalating.
+- Restart signaling after 4 seconds when a call stays at scall/turn status 100 without an SDP offer
+  (`EUFY_TURN_PENDING_TIMEOUT`); a fresh session normally gets status 200 and the offer at once.
+- Retry once, after 4 seconds, when the NVR answers 486 (`EUFY_BUSY_RETRIES`, `EUFY_BUSY_RETRY_DELAY`).
+- Add an optional `ice_allow` setting that limits the WebRTC candidates offered to the NVR to LAN prefixes.
 
 ## 0.7.17
 

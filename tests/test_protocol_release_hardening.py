@@ -47,7 +47,9 @@ def test_live_sessions_are_closed_before_process_teardown():
     assert "await close_live()" in stream
     assert 'if (\n            DISCOVER\n            or state["close_sent"]' not in stream
     assert "os.kill(proc.pid, signal.SIGINT)" in supervisor
-    assert "timeout=3.0" in supervisor
+    # The shielded engine teardown (closeLive, then peer close) gets 5 s before SIGTERM.
+    assert "timeout=5.0" in supervisor
+    assert "asyncio.shield(_closer)" in stream
     assert "await asyncio.sleep(SESSION_RELEASE_DELAY)" in supervisor
     assert "if not stop_event.is_set() and SESSION_RELEASE_DELAY" not in supervisor
 
