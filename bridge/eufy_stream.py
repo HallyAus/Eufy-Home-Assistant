@@ -17,6 +17,7 @@ import websockets
 import eufy_cloud as ec
 import stream_sensors
 import keyframe_gate
+from audio_feed import AudioFeed
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration
 from aiortc.sdp import candidate_from_sdp
 import logging
@@ -219,9 +220,14 @@ AUDIO_CHN_SETTING = os.environ.get("EUFY_AUDIO_CHN", "-1").strip() or "-1"
 AUDIO_PROBE = os.environ.get("EUFY_AUDIO_PROBE") == "1"
 
 
+AUDIO_ENABLED = AUDIO_CHN_SETTING != "-1"
+
+
 def audio_chn_for(channels):
+    """The audio_chn value for startStream: one camera's microphone, or -1 for none."""
     if AUDIO_CHN_SETTING == "auto":
-        return channels[0] if channels else -1
+        # Multi-camera grids stay silent; there is no single "right" microphone.
+        return channels[0] if len(channels) == 1 else -1
     try:
         return int(AUDIO_CHN_SETTING)
     except ValueError:
@@ -510,7 +516,7 @@ async def main():
 
     # The Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file. Held in
     # io so a reused session (EUFY_SESSION_REUSE_SECONDS) can switch it per camera.
-    io = {"ffmpeg": None, "sink": dumpf, "gate": None}
+    io = {"ffmpeg": None, "sink": dumpf, "gate": None, "audio": None}
     reuse_enabled = bool(REUSE_SECONDS and RTSP_URL and not DISCOVER and os.name != "nt")
 
     def new_gate():
@@ -540,16 +546,42 @@ async def main():
                     rows = max(slot // 3 for slot, _ch, _sensor in GROUP) + 1
                     if (cols, rows) != (3, 3):
                         vcodec = ["-vf", f"crop=iw*{cols}/3:ih*{rows}/3:0:0"] + vcodec
-            io["ffmpeg"] = await asyncio.create_subprocess_exec(
-                FFMPEG, "-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer",
-                # The input format is known, so probing only delays go2rtc publication.
-                # HA's camera proxy has a hard 10-second image timeout and the NVR's
-                # WebRTC handshake already consumes most of it on a cold start.
-                "-probesize", "32", "-analyzeduration", "0",
-                "-f", "hevc", "-r", "25", "-i", "pipe:",
-                *vcodec, "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
-                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL)
+            audio_rfd = None
+            vin = ["-f", "hevc", "-r", "25", "-i", "pipe:"]
+            ain, amap = [], []
+            if AUDIO_ENABLED and audio_chn_for(list(CHANNELS)) >= 0 and not GROUP:
+                audio_rfd, audio_wfd = os.pipe()
+                os.set_blocking(audio_wfd, False)
+                io["audio"] = AudioFeed(audio_wfd)
+                # Video takes wall-clock timestamps (the NVR's frame rate varies) and
+                # audio counts samples from the first video frame (AudioFeed), so both
+                # start at 0 together. Opus is what WebRTC and HomeKit both play.
+                # (An input -r would force a fixed 25 fps timeline and drift from audio.)
+                vin = ["-use_wallclock_as_timestamps", "1", "-f", "hevc", "-i", "pipe:"]
+                ain = ["-thread_queue_size", "64", "-probesize", "32", "-analyzeduration", "0",
+                       "-f", "aac", "-i", f"pipe:{audio_rfd}"]
+                amap = ["-map", "0:v", "-map", "1:a", "-fps_mode", "passthrough",
+                        "-c:a", "libopus", "-b:a", "24k", "-application", "lowdelay",
+                        "-max_interleave_delta", "200000"]
+                codec_label += " + Opus audio"
+            try:
+                io["ffmpeg"] = await asyncio.create_subprocess_exec(
+                    FFMPEG, "-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer",
+                    # The input format is known, so probing only delays go2rtc publication.
+                    # HA's camera proxy has a hard 10-second image timeout and the NVR's
+                    # WebRTC handshake already consumes most of it on a cold start.
+                    "-probesize", "32", "-analyzeduration", "0",
+                    *vin, *ain, *amap,
+                    *vcodec, "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
+                    stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    pass_fds=(audio_rfd,) if audio_rfd is not None else ())
+            finally:
+                if audio_rfd is not None:
+                    os.close(audio_rfd)
+            io["ffmpeg"].eufy_audio = io.get("audio") if audio_rfd is not None else None
+            if audio_rfd is None:
+                io["audio"] = None
             io["sink"] = io["ffmpeg"].stdin
             # RTSP_URL may contain the local go2rtc password; never print it.
             log(f"ffmpeg publishing {codec_label} to the configured RTSP endpoint")
@@ -563,6 +595,11 @@ async def main():
         """Stop one ffmpeg publisher (go2rtc sees its RTSP producer end)."""
         if proc is None:
             return
+        feed = getattr(proc, "eufy_audio", None)
+        if feed is not None:
+            feed.close()
+            if io.get("audio") is feed:
+                io["audio"] = None
         try:
             if proc.stdin:
                 proc.stdin.close()
@@ -607,8 +644,12 @@ async def main():
             if time.monotonic() - probe["t"] >= 5.0:
                 probe["t"] = time.monotonic()
                 log(f"PROBE summary frames={probe['n']} by_cmd={probe['by_cmd']} non_video={probe['nonvid']}")
-        if AUDIO_CHN_SETTING != "-1" and cmdid in (1300, 1301, 1303) and not (payload[22:25] == b"\x00\x00\x01" or payload[22:26] == b"\x00\x00\x00\x01"):
-            state["audio_frames"] = state.get("audio_frames", 0) + 1   # not HEVC: keep it out of the video pipe
+        if AUDIO_ENABLED and cmdid in (1300, 1301, 1303) and not (payload[22:25] == b"\x00\x00\x01" or payload[22:26] == b"\x00\x00\x00\x01"):
+            # Audio: [16-byte media header][ADTS AAC frame]. Never goes into the video pipe.
+            state["audio_frames"] = state.get("audio_frames", 0) + 1
+            feed = io.get("audio")
+            if feed is not None and feed.push(payload[16:]) and feed.real_frames == 1:
+                log(f"AUDIO first frame len={len(payload) - 16}")
             return
         if cmdid in (1300, 1301, 1303):                      # VIDEO: strip 16B XZYH + 22B media hdr -> Annex-B
             ffmpeg_proc = io["ffmpeg"]
@@ -629,6 +670,10 @@ async def main():
                 if hasattr(sink, "flush"): sink.flush()   # StreamWriter (ffmpeg.stdin) has no flush()
                 if passed and not video_ready.is_set():
                     video_ready.set()
+                feed = io.get("audio")
+                if feed is not None and passed:
+                    feed.start()
+                    feed.fill()
             except Exception as e:
                 state["fatal_reason"] = f"video sink failed ({type(e).__name__})"
                 log("sink write err:", e)
@@ -869,7 +914,7 @@ async def main():
                 # Retire the publisher before awaiting anything, so its watchdog knows
                 # an exit from here on is intended.
                 proc, io["ffmpeg"] = io["ffmpeg"], None
-                io["sink"], io["gate"] = dumpf, new_gate()
+                io["sink"], io["gate"], io["audio"] = dumpf, new_gate(), None
                 if not await stop_current_camera():
                     # Detached but unable to park: end the session ourselves.
                     log("SESSION could not be parked; closing the NVR session")

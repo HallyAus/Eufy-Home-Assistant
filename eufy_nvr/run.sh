@@ -36,6 +36,9 @@ export EUFY_STREAM_NAMES="${STATE_DIR}/stream_names.json"
 export EUFY_DISABLED_CHANNELS="$(bashio::config 'disabled_channels' '')"
 export EUFY_STREAM_SENSORS="$(bashio::config 'stream_sensors' '')"
 export EUFY_SESSION_REUSE_SECONDS="$(bashio::config 'session_reuse_seconds' '0')"
+# Camera audio (experimental): each single-camera stream carries that camera's microphone
+# as Opus. Multi-camera groups stay silent.
+if bashio::config.true 'audio'; then export EUFY_AUDIO_CHN="auto"; else export EUFY_AUDIO_CHN="-1"; fi
 export EUFY_ICE_ALLOW="$(bashio::config 'ice_allow' '')"
 export EUFY_SESSION_LOCK="${STATE_DIR}/eufy-session.lock"
 export EUFY_EXTRA_LENSES="$(bashio::config 'extra_lenses' '')"

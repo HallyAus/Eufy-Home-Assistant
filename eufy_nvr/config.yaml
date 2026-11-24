@@ -68,6 +68,7 @@ options:
   keep_warm: false
   adaptive_warm_seconds: 30
   session_reuse_seconds: 0
+  audio: false
   token_refresh_hours: 6
   video_copy: false
   extra_lenses: ""
@@ -96,6 +97,8 @@ schema:
   #   switch the next camera inside it (as eufy's web viewer does, ~0.2-1 s instead of a new
   #   3-4 s handshake). 0 (default) disables it; maximum 300.
   session_reuse_seconds: int(0,300)?
+  # audio: carry each camera's microphone (Opus) on single-camera streams. Experimental.
+  audio: bool?
   # token_refresh_hours: how often to re-login and refresh auth.json (the eufy token is ~1-day).
   token_refresh_hours: int(0,)?
   # video_copy: publish raw H.265 instead of transcoding to H.264 (lower CPU, but the browser live
