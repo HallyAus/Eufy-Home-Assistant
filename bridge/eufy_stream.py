@@ -498,6 +498,7 @@ async def main():
     # The Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file. Held in
     # io so a reused session (EUFY_SESSION_REUSE_SECONDS) can switch it per camera.
     io = {"ffmpeg": None, "sink": dumpf, "gate": None}
+    reuse_enabled = bool(REUSE_SECONDS and RTSP_URL and not DISCOVER and os.name != "nt")
 
     def new_gate():
         # Drop the NVR's start-up placeholder keyframe and feed the first real
@@ -583,6 +584,8 @@ async def main():
         if cmdid in (1300, 1301, 1303):                      # VIDEO: strip 16B XZYH + 22B media hdr -> Annex-B
             ffmpeg_proc = io["ffmpeg"]
             if ffmpeg_proc is not None and ffmpeg_proc.returncode is not None:
+                if reuse_enabled:
+                    return          # ffmpeg_watchdog parks or ends the session
                 if state["fatal_reason"] is None:
                     state["fatal_reason"] = f"ffmpeg exited rc={ffmpeg_proc.returncode}"
                     log(f"FFMPEG_EXIT rc={ffmpeg_proc.returncode}")
@@ -766,6 +769,14 @@ async def main():
             rc = await proc.wait()
             # A publisher retired on purpose (camera switch) is no longer io["ffmpeg"].
             if not state["shutting_down"] and io["ffmpeg"] is proc:
+                # go2rtc closes the publisher's RTSP session when the last viewer
+                # leaves, often before our supervisor's stop signal arrives. With
+                # session reuse that is the cue to park, not a failure.
+                if reuse_enabled and video_ready.is_set() and not state["fatal_reason"]:
+                    if await park("publisher closed"):
+                        return
+                    if state["shutting_down"]:
+                        return
                 state["fatal_reason"] = f"ffmpeg exited rc={rc}"
                 log(f"FFMPEG_EXIT rc={rc}")
                 await ws.close()
@@ -776,7 +787,6 @@ async def main():
         # ---- session reuse (EUFY_SESSION_REUSE_SECONDS) ------------------------------
         reuse = {"parked": False, "client": None, "idle": None, "server": None,
                  "detached": False, "lock": asyncio.Lock()}
-        reuse_enabled = bool(REUSE_SECONDS and RTSP_URL and not DISCOVER and os.name != "nt")
 
         def detach_from_supervisor():
             """Keep logging after the supervisor that started this engine exits.
