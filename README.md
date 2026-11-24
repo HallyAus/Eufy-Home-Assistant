@@ -136,6 +136,8 @@ Runs everything on your HA host; no always-on PC and no token paste.
    - *(optional)* `stream_sensors` — comma-separated `channel:sensor` pairs such as `0:0,2:0` for the startStream
      sensor index. PoE Cam E40 (T8P00) uses sensor 0 automatically; other cameras keep sensor 1. Try `channel:0`
      for a camera that connects but never receives video. Restart after changing it.
+   - *(optional)* `ice_allow` — comma-separated IPv4 prefixes such as `192.168.1.` (your LAN) to offer the NVR
+     only LAN WebRTC candidates; helps hosts with Docker/VPN/IPv6 interfaces whose first connection stalls in ICE "checking"
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
    - *(optional)* `verification_code` — when the log says mailbox verification is required, enter the

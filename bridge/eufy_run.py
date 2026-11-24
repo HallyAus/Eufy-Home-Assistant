@@ -45,6 +45,12 @@ SESSION_RELEASE_DELAY = max(
     0.0, min(float(os.environ.get("EUFY_SESSION_RELEASE_DELAY", "1.0")), 5.0)
 )
 
+# scall/TURN stuck at status 100 usually means the NVR is still retiring the last
+# call; a fresh signaling session a moment later normally gets 200 + SDP at once.
+TURN_PENDING_TIMEOUT = max(2.0, min(float(os.environ.get("EUFY_TURN_PENDING_TIMEOUT", "4")), 60.0))
+BUSY_RETRIES = max(0, min(int(os.environ.get("EUFY_BUSY_RETRIES", "1")), 3))
+BUSY_RETRY_DELAY = max(0.5, min(float(os.environ.get("EUFY_BUSY_RETRY_DELAY", "4.0")), 15.0))
+
 
 @dataclass
 class SessionState:
@@ -241,7 +247,7 @@ async def _terminate_tree(proc: asyncio.subprocess.Process) -> None:
         except ProcessLookupError:
             pass
         try:
-            await asyncio.wait_for(proc.wait(), timeout=3.0)
+            await asyncio.wait_for(proc.wait(), timeout=5.0)
         except asyncio.TimeoutError:
             pass
     try:
@@ -329,6 +335,13 @@ async def run_attempt(
                 reason = "busy"
                 await _terminate_tree(proc)
                 break
+            if (
+                state.turn_pending and not state.sdp_seen
+                and now - state.last_progress >= TURN_PENDING_TIMEOUT
+            ):
+                reason = "signaling_timeout"
+                await _terminate_tree(proc)
+                break
             if not state.sdp_seen and now - state.started_at >= SIGNAL_TIMEOUT:
                 reason = "signaling_timeout"
                 await _terminate_tree(proc)
@@ -380,6 +393,7 @@ async def main(argv: list[str] | None = None) -> int:
             except ValueError:
                 pass
 
+    busy_retries = 0
     for attempt in range(1, MAX_ATTEMPTS + 1):
         if attempt > 1:
             delay = min(2 ** (attempt - 2), 4)
@@ -421,6 +435,21 @@ async def main(argv: list[str] | None = None) -> int:
                 flush=True,
             )
             return 78
+
+        if reason == "busy" and not discovery and busy_retries < BUSY_RETRIES:
+            busy_retries += 1
+            print(
+                f"eufy supervisor: NVR busy (486); waiting {BUSY_RETRY_DELAY:.1f}s "
+                f"for the previous session to retire, then retrying ({busy_retries}/{BUSY_RETRIES})",
+                file=sys.stderr,
+                flush=True,
+            )
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=BUSY_RETRY_DELAY)
+                return 0
+            except asyncio.TimeoutError:
+                pass
+            continue
 
         if reason == "busy" and not discovery:
             print(

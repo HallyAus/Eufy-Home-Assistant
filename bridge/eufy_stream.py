@@ -704,6 +704,15 @@ async def main():
                             chans[lbl] = pc.createDataChannel(lbl); attach(chans[lbl], True)
                         ans = await pc.createAnswer(); await pc.setLocalDescription(ans)
                         uf, pw, fp, cands = extract_local_ice(pc.localDescription.sdp)
+                        _allow = [a.strip() for a in os.environ.get("EUFY_ICE_ALLOW", "").split(",") if a.strip()]
+                        if _allow:
+                            # Only advertise LAN candidates: docker/hassio/VPN interfaces on the host
+                            # give the NVR unreachable pairs and ICE can sit in "checking".
+                            _kept = [c for c in cands if len(c.split()) > 4 and any(c.split()[4].startswith(a) for a in _allow)]
+                            log(f"ICE candidates: advertising {len(_kept)}/{len(cands)} "
+                                f"({','.join(sorted({c.split()[4] for c in _kept}))})")
+                            if _kept:
+                                cands = _kept
                         log(f"answer sent; our cands={len(cands)}")
                         await sig.send_sdp(pc.localDescription.sdp, uf, pw, fp, "active")
                         for c in cands: await sig.send_candidate(c)
@@ -742,7 +751,28 @@ async def main():
             log("ws loop err:", repr(e))
         finally:
             state["shutting_down"] = True
-            await close_live()
+
+            async def _graceful_close():
+                await close_live()
+                try:
+                    await asyncio.wait_for(pc.close(), timeout=2.0)
+                    log("peer connection closed cleanly")
+                except Exception as error:
+                    log("peer connection close failed:", type(error).__name__)
+
+            # ffmpeg exiting and go2rtc's SIGINT often arrive together. The second
+            # cancellation used to abort closeLive/pc.close half way, leaving the NVR
+            # to time the call out (~60 s of scall/turn 486 for every camera).
+            # Finish the teardown even if this task is cancelled again meanwhile.
+            _closer = asyncio.ensure_future(_graceful_close())
+            _interrupted = False
+            while not _closer.done():
+                try:
+                    await asyncio.shield(_closer)
+                except asyncio.CancelledError:
+                    _interrupted = True
+            if _interrupted:
+                log("teardown completed despite cancellation")
             if ffmpeg_watchdog_task is not None and not ffmpeg_watchdog_task.done():
                 ffmpeg_watchdog_task.cancel()
                 await asyncio.gather(ffmpeg_watchdog_task, return_exceptions=True)
