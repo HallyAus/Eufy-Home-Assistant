@@ -775,7 +775,9 @@ async def main():
                 if reuse_enabled and video_ready.is_set() and not state["fatal_reason"]:
                     if await park("publisher closed"):
                         return
-                    if state["shutting_down"]:
+                    # Lost the race to a concurrent park (the viewer's socket closed
+                    # at the same moment), which already retired this publisher.
+                    if state["shutting_down"] or io["ffmpeg"] is not proc:
                         return
                 state["fatal_reason"] = f"ffmpeg exited rc={rc}"
                 log(f"FFMPEG_EXIT rc={rc}")
@@ -835,13 +837,15 @@ async def main():
                     return False
                 detach_from_supervisor()
                 reuse["client"] = None
+                # Retire the publisher before awaiting anything, so its watchdog knows
+                # an exit from here on is intended.
+                proc, io["ffmpeg"] = io["ffmpeg"], None
+                io["sink"], io["gate"] = dumpf, new_gate()
                 if not await stop_current_camera():
                     # Detached but unable to park: end the session ourselves.
                     log("SESSION could not be parked; closing the NVR session")
                     asyncio.ensure_future(ws.close())
                     return False
-                proc, io["ffmpeg"] = io["ffmpeg"], None
-                io["sink"], io["gate"] = dumpf, new_gate()
                 video_ready.clear()
                 await close_sink(proc)
                 if reuse["server"] is None:
