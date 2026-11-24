@@ -213,6 +213,19 @@ HEADERS = {
 VIDEO_DUMP = os.path.join(ROOT, "_debug", "video_dump.bin")
 FRAMES_LOG = os.path.join(ROOT, "_debug", "frames.jsonl")
 CAPTURE_DEBUG = os.environ.get("EUFY_CAPTURE_DEBUG") == "1"
+# Audio (experimental). EUFY_AUDIO_CHN: -1 = no audio (default), "auto" = the first
+# streamed channel, or an explicit channel number. EUFY_AUDIO_PROBE=1 logs what arrives.
+AUDIO_CHN_SETTING = os.environ.get("EUFY_AUDIO_CHN", "-1").strip() or "-1"
+AUDIO_PROBE = os.environ.get("EUFY_AUDIO_PROBE") == "1"
+
+
+def audio_chn_for(channels):
+    if AUDIO_CHN_SETTING == "auto":
+        return channels[0] if channels else -1
+    try:
+        return int(AUDIO_CHN_SETTING)
+    except ValueError:
+        return -1
 # Discovery manifest. Like EUFY_AUTH, the add-on points this at /data so the
 # discovered camera list survives a container restart/rebuild and gen_go2rtc.py
 # reads it from the exact same place; default to the bridge dir for standalone runs.
@@ -269,7 +282,7 @@ def build_startstream(user_id, channels, stream_id=1, sensors=None):
         payload = json.dumps({
             "account_id": user_id, "cmd": 1003,
             "payload": {"ClientOS": "WEB", "entrytype": 0, "camera_type": 0, "key": "",
-                        "msg_id": 116, "audio_chn": -1, "streamtype": 2, "stitch_mode": 3,
+                        "msg_id": 116, "audio_chn": audio_chn_for([ch for _, ch, _ in GROUP]), "streamtype": 2, "stitch_mode": 3,
                         "chn_list": [{"index": slot, "chn": ch, "sensor": sensor, "isUps": 1,
                                       "isClicked": True} for slot, ch, sensor in GROUP],
                         "pip_cord": {"x1": 0, "y1": 0, "x2": 0, "y2": 0},
@@ -283,7 +296,7 @@ def build_startstream(user_id, channels, stream_id=1, sensors=None):
         payload = json.dumps({
             "account_id": user_id, "cmd": 1003,
             "payload": {"ClientOS": "WEB", "entrytype": 1, "camera_type": 0, "streamtype": 2,
-                        "key": "", "msg_id": "", "audio_chn": -1, "stitch_mode": 1, "chn_list": chn_list},
+                        "key": "", "msg_id": "", "audio_chn": audio_chn_for(list(channels)), "stitch_mode": 1, "chn_list": chn_list},
         }, separators=(",", ":")).encode()
     h = bytearray(16)
     h[0:4] = b"XZYH"
@@ -581,6 +594,22 @@ async def main():
         xz = buf[:4] == b"XZYH"
         cmdid = (buf[4] | (buf[5] << 8)) if (xz and len(buf) >= 6) else -1
         payload = buf[16:] if xz else buf
+        if AUDIO_PROBE:
+            probe = state.setdefault("probe", {"n": 0, "by_cmd": {}, "nonvid": 0, "t": time.monotonic()})
+            probe["n"] += 1
+            probe["by_cmd"][cmdid] = probe["by_cmd"].get(cmdid, 0) + 1
+            annexb = payload[22:25] == b"\x00\x00\x01" or payload[22:26] == b"\x00\x00\x00\x01"
+            if not annexb:
+                probe["nonvid"] += 1
+            if probe["n"] <= 12 or (not annexb and probe["nonvid"] <= 25):
+                log(f"PROBE frame n={probe['n']} cmd={cmdid} len={len(buf)} ch={buf[12] if len(buf) > 12 else -1} "
+                    f"annexb={int(annexb)} xz={buf[:16].hex()} hdr={payload[:22].hex()} data={payload[22:54].hex()}")
+            if time.monotonic() - probe["t"] >= 5.0:
+                probe["t"] = time.monotonic()
+                log(f"PROBE summary frames={probe['n']} by_cmd={probe['by_cmd']} non_video={probe['nonvid']}")
+        if AUDIO_CHN_SETTING != "-1" and cmdid in (1300, 1301, 1303) and not (payload[22:25] == b"\x00\x00\x01" or payload[22:26] == b"\x00\x00\x00\x01"):
+            state["audio_frames"] = state.get("audio_frames", 0) + 1   # not HEVC: keep it out of the video pipe
+            return
         if cmdid in (1300, 1301, 1303):                      # VIDEO: strip 16B XZYH + 22B media hdr -> Annex-B
             ffmpeg_proc = io["ffmpeg"]
             if ffmpeg_proc is not None and ffmpeg_proc.returncode is not None:
