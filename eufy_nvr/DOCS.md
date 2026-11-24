@@ -47,6 +47,16 @@ cloud; the video itself is pulled LAN-direct from the NVR.
      WebRTC candidates offered to the NVR. Hosts with Docker, VPN (for example Tailscale) or IPv6
      interfaces otherwise offer unreachable candidates and the first connection attempt can stall in ICE
      "checking". Falls back to every candidate if none match.
+   - *(optional)* `extra_lenses` -> extra streams for the second lens of dual-lens cameras, as
+     `channel:sensor` pairs. On S4 Max PoE cameras sensor `1` (the default stream) is the PTZ lens and
+     sensor `0` the fixed wide lens, so `0:0,1:0` adds the fixed lens for channels 0 and 1 as
+     `<camera>_lens0` streams.
+   - *(optional)* `camera_groups` -> show several cameras live at once. The NVR composites them into one
+     video (the same multi-view the official web viewer uses), so a group uses the single live session
+     like one camera. Format: `name=slot-channel-sensor,...` with `;` between groups, for example
+     `front=0-0-1,1-1-1,3-0-0,4-1-0`. Slots `0`-`8` are a 3x3 grid read left to right, top to bottom; the
+     stream is cropped to the rows and columns in use (with transcoding on). Each tile is about 640x360.
+     Each group appears as `eufy_group_<name>`.
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
      captcha (the log prints the `captcha_id`; solve it and set both, then restart).

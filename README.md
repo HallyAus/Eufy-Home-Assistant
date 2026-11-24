@@ -138,6 +138,10 @@ Runs everything on your HA host; no always-on PC and no token paste.
      for a camera that connects but never receives video. Restart after changing it.
    - *(optional)* `ice_allow` — comma-separated IPv4 prefixes such as `192.168.1.` (your LAN) to offer the NVR
      only LAN WebRTC candidates; helps hosts with Docker/VPN/IPv6 interfaces whose first connection stalls in ICE "checking"
+   - *(optional)* `extra_lenses` — `channel:sensor` pairs that add the second lens of dual-lens cameras
+     (S4 Max PoE: `0` is the fixed lens, `1` the default PTZ lens), for example `0:0,1:0`
+   - *(optional)* `camera_groups` — several cameras live in one stream, composited by the NVR, for example
+     `front=0-0-1,1-1-1;back=0-2-1,1-3-1` (`slot-channel-sensor`, slots `0`-`8` on a 3x3 grid)
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
    - *(optional)* `verification_code` — when the log says mailbox verification is required, enter the
