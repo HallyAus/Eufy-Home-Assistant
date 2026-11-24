@@ -253,9 +253,12 @@ class Go2RtcClient:
             ) from err
 
     async def async_get_frame(
-        self, stream: str, *, timeout: float | None = None
+        self, stream: str, *, timeout: float | None = None, cache: bool = True
     ) -> bytes:
         """Fetch a cached JPEG directly from go2rtc.
+
+        ``cache=False`` asks go2rtc for a frame from the running producer
+        instead of its 30 s JPEG cache (used for previews of watched streams).
 
         Width and height are deliberately omitted: go2rtc 1.9.14 keys its JPEG
         cache by stream name, not rendition dimensions. One full frame per
@@ -271,7 +274,7 @@ class Go2RtcClient:
         try:
             async with self._session.get(
                 self.frame_url,
-                params={"src": stream, "cache": "30s"},
+                params={"src": stream, "cache": "30s"} if cache else {"src": stream},
                 timeout=request_timeout,
                 headers=self._headers,
             ) as response:

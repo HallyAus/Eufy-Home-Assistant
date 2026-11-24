@@ -124,9 +124,17 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Coalesce dashboard thumbnails without repeatedly spawning FFmpeg."""
+        """Return the stored preview, else a coalesced go2rtc snapshot.
+
+        Stored previews never open an NVR session, so dashboards do not compete
+        with live viewing. The snapshot fallback only covers cameras that have
+        no preview yet.
+        """
         if not self.available:
             return None
+        preview = self.coordinator.previews.get(self._stream)
+        if preview is not None:
+            return preview
 
         try:
             image = await self.coordinator.async_get_frame(self._stream)
@@ -151,4 +159,5 @@ class EufyNvrCamera(CoordinatorEntity[EufyNvrCoordinator], Camera):
         return {
             "stream_name": self._stream,
             **stream_summary(info),
+            "preview_updated": self.coordinator.previews.updated_iso(self._stream),
         }
