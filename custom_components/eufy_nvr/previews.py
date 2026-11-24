@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 import io
 import logging
 import os
+import re
 import time
 
 from homeassistant.config_entries import ConfigEntry
@@ -46,6 +47,22 @@ REFRESH_GREY_RETRIES = 2  # extra grabs (3 s apart) if the frame is still grey
 REFRESH_GAP = 15.0  # pause between cameras so the NVR settles
 REFRESH_CHECK = 60.0
 STARTUP_DELAY = 300.0
+
+# Every refresh holds the NVR's single live session, so live views queue behind
+# it. Extra lenses (<camera>_lens<N>) refresh at half the rate and multi-view
+# groups (eufy_group_<name>) are never refreshed in the background; watching
+# them still updates their preview passively.
+LENS_REFRESH_FACTOR = 2.0
+
+
+def refresh_interval(stream: str) -> float | None:
+    """Background refresh interval for a stream, or None to never refresh."""
+    if stream.startswith("eufy_group_"):
+        return None
+    if re.search(r"_lens\d+$", stream):
+        return REFRESH_INTERVAL * LENS_REFRESH_FACTOR
+    return REFRESH_INTERVAL
+
 
 GREY_STDDEV = 6.0  # luminance std-dev below this = flat grey placeholder frame
 
@@ -291,12 +308,15 @@ class PreviewManager:
 
     async def _async_refresh_cycle(self) -> None:
         for stream in sorted(self._streams):
+            interval = refresh_interval(stream)
+            if interval is None:
+                continue
             now_wall = time.time()
-            if now_wall - self._stamps.get(stream, 0.0) < REFRESH_INTERVAL:
+            if now_wall - self._stamps.get(stream, 0.0) < interval:
                 continue
             # One attempt per camera per interval, success or not, so a failing
             # NVR/cloud session is never hammered.
-            if now_wall - self._attempts.get(stream, 0.0) < REFRESH_INTERVAL:
+            if now_wall - self._attempts.get(stream, 0.0) < interval:
                 continue
             if not self._idle():
                 return

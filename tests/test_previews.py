@@ -108,3 +108,12 @@ def test_priming_skips_cameras_that_already_have_a_preview():
     assert camera.index("self.coordinator.previews.get(self._stream)") < camera.index(
         "await self.coordinator.async_get_frame(self._stream)"
     )
+
+
+def test_refresh_interval_tiers():
+    """Groups never auto-refresh; extra lenses refresh at half the rate."""
+    base = previews.REFRESH_INTERVAL
+    assert previews.refresh_interval("eufy_garage") == base
+    assert previews.refresh_interval("eufy_front_lens0") == base * previews.LENS_REFRESH_FACTOR
+    assert previews.refresh_interval("eufy_group_front") is None
+    assert previews.refresh_interval("eufy_lens_room") == base
