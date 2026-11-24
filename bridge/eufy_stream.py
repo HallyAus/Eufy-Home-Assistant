@@ -16,6 +16,7 @@ import aiohttp
 import websockets
 import eufy_cloud as ec
 import stream_sensors
+import keyframe_gate
 from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration
 from aiortc.sdp import candidate_from_sdp
 import logging
@@ -452,6 +453,11 @@ async def main():
     else:
         sink = dumpf
 
+    # Drop the NVR's start-up placeholder keyframe and feed the first real
+    # keyframe twice (ffmpeg's probe swallows one copy); see keyframe_gate.py.
+    start_gate = keyframe_gate.KeyframeGate(
+        duplicate_first=os.environ.get("EUFY_DUP_FIRST_KEYFRAME", "1") != "0", log=log)
+
     def send_ptcs(buf):
         ch = chans.get("WebrtcDataChannel")
         try:
@@ -477,7 +483,8 @@ async def main():
             nal = payload[22:]
             state["vbytes"] += len(nal); state["vframes"] += 1
             try:
-                sink.write(nal)
+                for _out in start_gate.push(nal, keyframe_gate.frame_size(payload[:22])):
+                    sink.write(_out)
                 if hasattr(sink, "flush"): sink.flush()   # StreamWriter (ffmpeg.stdin) has no flush()
             except Exception as e:
                 state["fatal_reason"] = f"video sink failed ({type(e).__name__})"
