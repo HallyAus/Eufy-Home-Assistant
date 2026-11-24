@@ -10,7 +10,7 @@ Reuses the proven WebRTC transport (see eufy_webrtc.py / notes/04) and adds:
 Auth: captures/eufy_auth.json (webcap/token.js). user_id: captures/user_id.txt (decrypted from auid).
 Run:  python scripts/eufy_stream.py [channel]      (channel 0..3, default 0)
 """
-import asyncio, json, time, uuid, os, sys, hashlib, re, base64, struct, ipaddress
+import asyncio, json, time, uuid, os, sys, hashlib, re, base64, struct, ipaddress, signal
 
 import aiohttp
 import websockets
@@ -133,23 +133,52 @@ def _decrypt_user_id():
     return json.loads(pt[:-pt[-1]])
 USER_ID = _decrypt_user_id()
 DISCOVER = "--discover" in sys.argv   # connect, run cmd 9100 -> list NVR ip + cameras (ch,name), write cameras.json, exit
-_carg = sys.argv[1] if len(sys.argv) > 1 and not sys.argv[1].startswith("--") else "0"
-# "g:<slot>-<channel>-<sensor>,..." requests one NVR-side multi-view (the official
-# web viewer's stitch_mode 3): the NVR composites the cameras into a single video on
-# a 3x3 grid, each tile placed by its slot (0-8, row-major).
-GROUP = None
-if _carg.startswith("g:"):
+def parse_selection(argv):
+    """Cameras requested by an engine argv: (channels, multi-view group or None).
+
+    "g:<slot>-<channel>-<sensor>,..." requests one NVR-side multi-view (the official
+    web viewer's stitch_mode 3): the NVR composites the cameras into a single video on
+    a 3x3 grid, each tile placed by its slot (0-8, row-major).
+    """
+    carg = argv[1] if len(argv) > 1 and not argv[1].startswith("--") else "0"
+    if not carg.startswith("g:"):
+        return ([0, 1, 2, 3] if carg == "all" else [int(x) for x in carg.split(",")]), None
     try:
-        GROUP = [tuple(int(v) for v in item.split("-")) for item in _carg[2:].split(",") if item]
+        group = [tuple(int(v) for v in item.split("-")) for item in carg[2:].split(",") if item]
     except ValueError:
         raise SystemExit("group spec must look like g:0-0-1,1-1-1 (slot-channel-sensor)")
-    if (not GROUP or len(GROUP) > 9 or any(len(t) != 3 for t in GROUP)
-            or len({t[0] for t in GROUP}) != len(GROUP)
-            or not all(0 <= sl <= 8 and 0 <= ch <= 255 and 0 <= se <= 7 for sl, ch, se in GROUP)):
+    if (not group or len(group) > 9 or any(len(t) != 3 for t in group)
+            or len({t[0] for t in group}) != len(group)
+            or not all(0 <= sl <= 8 and 0 <= ch <= 255 and 0 <= se <= 7 for sl, ch, se in group)):
         raise SystemExit("group spec needs 1-9 unique slots 0-8, channels 0-255, sensors 0-7")
-    CHANNELS = list(dict.fromkeys(ch for _slot, ch, _sensor in GROUP))
-else:
-    CHANNELS = [0, 1, 2, 3] if _carg == "all" else [int(x) for x in _carg.split(",")]
+    return list(dict.fromkeys(ch for _slot, ch, _sensor in group)), group
+
+
+def parse_sensor(argv):
+    """The explicit "--sensor N" lens selection, or None."""
+    if "--sensor" not in argv:
+        return None
+    i = argv.index("--sensor")
+    try:
+        sensor = int(argv[i + 1])
+    except (IndexError, ValueError):
+        raise SystemExit("--sensor needs a number")
+    if not 0 <= sensor <= 7:
+        raise SystemExit("--sensor must be between 0 and 7")
+    return sensor
+
+
+def parse_rtsp(argv):
+    """The "--rtsp <url>" publish target, or None."""
+    if "--rtsp" not in argv:
+        return None
+    i = argv.index("--rtsp")
+    if i + 1 >= len(argv):
+        raise SystemExit("--rtsp needs a URL")
+    return argv[i + 1]
+
+
+CHANNELS, GROUP = parse_selection(sys.argv)
 
 # Keep action3/control signaling anchored to the NVR primary channel (0).
 # Requested camera selection remains in CHANNELS/openLive/startStream.
@@ -158,22 +187,14 @@ CALL_TYPE = os.environ.get("EUFY_CALL_TYPE", "call").strip().lower()
 if CALL_TYPE not in ("call", "scall"):
     raise SystemExit("EUFY_CALL_TYPE must be 'call' or 'scall'")
 # --rtsp <url>: publish the H.265 stream to that RTSP url via ffmpeg (go2rtc exec {output} mode).
-RTSP_URL = None
-if "--rtsp" in sys.argv:
-    RTSP_URL = sys.argv[sys.argv.index("--rtsp") + 1]
+RTSP_URL = parse_rtsp(sys.argv)
 STREAM_MODE = bool(RTSP_URL) or os.environ.get("EUFY_STDOUT") == "1"   # run indefinitely, no frame-count stop
 _rest = [a for a in sys.argv[2:] if a not in ("--rtsp", RTSP_URL)]
 # Dual-lens cameras (for example S4 Max PoE): "--sensor N" selects the lens for this
 # stream. Sensor 1 stays the default; on the S4 Max it is the PTZ lens and 0 the fixed lens.
-SENSOR = None
-if "--sensor" in sys.argv:
+SENSOR = parse_sensor(sys.argv)
+if SENSOR is not None:
     _i = sys.argv.index("--sensor")
-    try:
-        SENSOR = int(sys.argv[_i + 1])
-    except (IndexError, ValueError):
-        raise SystemExit("--sensor needs a number")
-    if not 0 <= SENSOR <= 7:
-        raise SystemExit("--sensor must be between 0 and 7")
     _rest = [a for a in _rest if a not in sys.argv[_i:_i + 2]]
 RUN_SECS = int(_rest[0]) if _rest and _rest[0].isdigit() else (10**9 if STREAM_MODE else 70)
 NODE = _bin("node")
@@ -202,12 +223,24 @@ try:
     _SENSOR_OVERRIDES = stream_sensors.parse_stream_sensors(os.environ.get("EUFY_STREAM_SENSORS", ""))
 except ValueError as _err:
     raise SystemExit(str(_err))
-STREAM_SENSORS = stream_sensors.sensors_for_channels(
-    CHANNELS, stream_sensors.load_serials(CAMERAS_JSON), _SENSOR_OVERRIDES)
-if SENSOR is not None:
-    # An explicit --sensor (an extra-lens stream) wins over the per-camera default.
-    STREAM_SENSORS = {c: SENSOR for c in CHANNELS}
+def stream_sensor_map(channels, sensor):
+    """startStream sensor per channel; an explicit --sensor (extra-lens stream) wins."""
+    if sensor is not None:
+        return {c: sensor for c in channels}
+    return stream_sensors.sensors_for_channels(
+        channels, stream_sensors.load_serials(CAMERAS_JSON), _SENSOR_OVERRIDES)
 
+
+STREAM_SENSORS = stream_sensor_map(CHANNELS, SENSOR)
+
+# Session reuse: when a viewer leaves, keep the NVR WebRTC session open this many
+# seconds (0 = off). The next camera request is handed to it over a local socket and
+# switches with closeLive (1004) + openLive/startStream, as the official web viewer
+# does, instead of a new signaling/ICE/DTLS handshake.
+REUSE_SECONDS = max(0, min(int(os.environ.get("EUFY_SESSION_REUSE_SECONDS", "0") or 0), 300))
+SESSION_SOCKET = os.environ.get("EUFY_SESSION_SOCKET", "/tmp/eufy_nvr_session.sock")
+REUSE_FIRST_VIDEO_TIMEOUT = 10.0
+REUSE_STALL_TIMEOUT = 20.0
 STDOUT_MODE = os.environ.get("EUFY_STDOUT") == "1"   # write clean Annex-B to stdout (for go2rtc/ffmpeg exec source)
 def now(): return int(time.time())
 def signaling_account(channel, user_id, timestamp):
@@ -447,6 +480,7 @@ async def main():
              "cmd_dc_open": False, "frames_seen": 0, "nvr_ip": None, "discovered": False,
              "fatal_reason": None, "shutting_down": False, "close_sent": False}
     close_ack = asyncio.Event()
+    video_ready = asyncio.Event()   # set once the current camera's first frame reaches the sink
 
     def on_control_status(status):
         if state["close_sent"] and status == 0:
@@ -461,50 +495,74 @@ async def main():
         dumpf = open(os.devnull, "wb")
         framelog = open(os.devnull, "w")
 
-    # Pick the Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file.
-    ffmpeg_proc = None
-    if RTSP_URL:
-        # Transcode HEVC -> H.264 so Home Assistant / browsers can render the LIVE view.
-        # (H.265 only shows the still thumbnail; most browsers can't play it live.) Set
-        # EUFY_VIDEO_COPY=1 to passthrough raw H.265 instead (lower CPU, thumbnail only).
-        if os.environ.get("EUFY_VIDEO_COPY") == "1":
-            vcodec = ["-c:v", "copy"]
-            _codec_label = "H.265 (copy)"
-        else:
-            # short GOP so a NEW consumer (HA opening live view) gets an IDR fast instead of
-            # waiting a full GOP. The feed runs <25fps, so g=12 => a keyframe every ~0.5-0.8s
-            # (g=25 was ~1.5-2s of keyframe-wait per open). zerolatency drops B-frames.
-            vcodec = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-                      "-pix_fmt", "yuv420p", "-g", "12", "-keyint_min", "12", "-sc_threshold", "0"]
-            _codec_label = "H.264 (transcoded)"
-            if GROUP:
-                # The NVR always sends the full 3x3 grid; keep only the rows/columns in use.
-                cols = max(slot % 3 for slot, _ch, _sensor in GROUP) + 1
-                rows = max(slot // 3 for slot, _ch, _sensor in GROUP) + 1
-                if (cols, rows) != (3, 3):
-                    vcodec = ["-vf", f"crop=iw*{cols}/3:ih*{rows}/3:0:0"] + vcodec
-        ffmpeg_proc = await asyncio.create_subprocess_exec(
-            FFMPEG, "-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer",
-            # The input format is known, so probing only delays go2rtc publication.
-            # HA's camera proxy has a hard 10-second image timeout and the NVR's
-            # WebRTC handshake already consumes most of it on a cold start.
-            "-probesize", "32", "-analyzeduration", "0",
-            "-f", "hevc", "-r", "25", "-i", "pipe:",
-            *vcodec, "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
-            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL)
-        sink = ffmpeg_proc.stdin
-        # RTSP_URL may contain the local go2rtc password; never print it.
-        log(f"ffmpeg publishing {_codec_label} to the configured RTSP endpoint")
-    elif STDOUT_MODE:
-        sink = sys.stdout.buffer
-    else:
-        sink = dumpf
+    # The Annex-B sink: ffmpeg->RTSP (go2rtc), stdout (pipe), or a dump file. Held in
+    # io so a reused session (EUFY_SESSION_REUSE_SECONDS) can switch it per camera.
+    io = {"ffmpeg": None, "sink": dumpf, "gate": None}
 
-    # Drop the NVR's start-up placeholder keyframe and feed the first real
-    # keyframe twice (ffmpeg's probe swallows one copy); see keyframe_gate.py.
-    start_gate = keyframe_gate.KeyframeGate(
-        duplicate_first=os.environ.get("EUFY_DUP_FIRST_KEYFRAME", "1") != "0", log=log)
+    def new_gate():
+        # Drop the NVR's start-up placeholder keyframe and feed the first real
+        # keyframe twice (ffmpeg's probe swallows one copy); see keyframe_gate.py.
+        return keyframe_gate.KeyframeGate(
+            duplicate_first=os.environ.get("EUFY_DUP_FIRST_KEYFRAME", "1") != "0", log=log)
+
+    async def open_sink():
+        if RTSP_URL:
+            # Transcode HEVC -> H.264 so Home Assistant / browsers can render the LIVE view.
+            # (H.265 only shows the still thumbnail; most browsers can't play it live.) Set
+            # EUFY_VIDEO_COPY=1 to passthrough raw H.265 instead (lower CPU, thumbnail only).
+            if os.environ.get("EUFY_VIDEO_COPY") == "1":
+                vcodec = ["-c:v", "copy"]
+                codec_label = "H.265 (copy)"
+            else:
+                # short GOP so a NEW consumer (HA opening live view) gets an IDR fast instead of
+                # waiting a full GOP. The feed runs <25fps, so g=12 => a keyframe every ~0.5-0.8s
+                # (g=25 was ~1.5-2s of keyframe-wait per open). zerolatency drops B-frames.
+                vcodec = ["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+                          "-pix_fmt", "yuv420p", "-g", "12", "-keyint_min", "12", "-sc_threshold", "0"]
+                codec_label = "H.264 (transcoded)"
+                if GROUP:
+                    # The NVR always sends the full 3x3 grid; keep only the rows/columns in use.
+                    cols = max(slot % 3 for slot, _ch, _sensor in GROUP) + 1
+                    rows = max(slot // 3 for slot, _ch, _sensor in GROUP) + 1
+                    if (cols, rows) != (3, 3):
+                        vcodec = ["-vf", f"crop=iw*{cols}/3:ih*{rows}/3:0:0"] + vcodec
+            io["ffmpeg"] = await asyncio.create_subprocess_exec(
+                FFMPEG, "-hide_banner", "-loglevel", "warning", "-fflags", "nobuffer",
+                # The input format is known, so probing only delays go2rtc publication.
+                # HA's camera proxy has a hard 10-second image timeout and the NVR's
+                # WebRTC handshake already consumes most of it on a cold start.
+                "-probesize", "32", "-analyzeduration", "0",
+                "-f", "hevc", "-r", "25", "-i", "pipe:",
+                *vcodec, "-rtsp_transport", "tcp", "-f", "rtsp", RTSP_URL,
+                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL)
+            io["sink"] = io["ffmpeg"].stdin
+            # RTSP_URL may contain the local go2rtc password; never print it.
+            log(f"ffmpeg publishing {codec_label} to the configured RTSP endpoint")
+        elif STDOUT_MODE:
+            io["sink"] = sys.stdout.buffer
+        else:
+            io["sink"] = dumpf
+        io["gate"] = new_gate()
+
+    async def close_sink(proc):
+        """Stop one ffmpeg publisher (go2rtc sees its RTSP producer end)."""
+        if proc is None:
+            return
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+            if proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=3)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+        except ProcessLookupError:
+            pass
+
+    await open_sink()
 
     def send_ptcs(buf):
         ch = chans.get("WebrtcDataChannel")
@@ -523,6 +581,7 @@ async def main():
         cmdid = (buf[4] | (buf[5] << 8)) if (xz and len(buf) >= 6) else -1
         payload = buf[16:] if xz else buf
         if cmdid in (1300, 1301, 1303):                      # VIDEO: strip 16B XZYH + 22B media hdr -> Annex-B
+            ffmpeg_proc = io["ffmpeg"]
             if ffmpeg_proc is not None and ffmpeg_proc.returncode is not None:
                 if state["fatal_reason"] is None:
                     state["fatal_reason"] = f"ffmpeg exited rc={ffmpeg_proc.returncode}"
@@ -531,9 +590,13 @@ async def main():
             nal = payload[22:]
             state["vbytes"] += len(nal); state["vframes"] += 1
             try:
-                for _out in start_gate.push(nal, keyframe_gate.frame_size(payload[:22])):
+                sink = io["sink"]
+                passed = io["gate"].push(nal, keyframe_gate.frame_size(payload[:22]))
+                for _out in passed:
                     sink.write(_out)
                 if hasattr(sink, "flush"): sink.flush()   # StreamWriter (ffmpeg.stdin) has no flush()
+                if passed and not video_ready.is_set():
+                    video_ready.set()
             except Exception as e:
                 state["fatal_reason"] = f"video sink failed ({type(e).__name__})"
                 log("sink write err:", e)
@@ -699,15 +762,168 @@ async def main():
         answered = [False]; pending = []
         ffmpeg_watchdog_task = None
 
-        async def ffmpeg_watchdog():
-            rc = await ffmpeg_proc.wait()
-            if not state["shutting_down"]:
+        async def ffmpeg_watchdog(proc):
+            rc = await proc.wait()
+            # A publisher retired on purpose (camera switch) is no longer io["ffmpeg"].
+            if not state["shutting_down"] and io["ffmpeg"] is proc:
                 state["fatal_reason"] = f"ffmpeg exited rc={rc}"
                 log(f"FFMPEG_EXIT rc={rc}")
                 await ws.close()
 
-        if ffmpeg_proc is not None:
-            ffmpeg_watchdog_task = asyncio.create_task(ffmpeg_watchdog())
+        if io["ffmpeg"] is not None:
+            ffmpeg_watchdog_task = asyncio.create_task(ffmpeg_watchdog(io["ffmpeg"]))
+
+        # ---- session reuse (EUFY_SESSION_REUSE_SECONDS) ------------------------------
+        reuse = {"parked": False, "client": None, "idle": None, "server": None,
+                 "detached": False, "lock": asyncio.Lock()}
+        reuse_enabled = bool(REUSE_SECONDS and RTSP_URL and not DISCOVER and os.name != "nt")
+
+        def detach_from_supervisor():
+            """Keep logging after the supervisor that started this engine exits.
+
+            Closing our end of its stderr pipe is also the supervisor's signal that
+            the session is parked and it may exit without tearing anything down.
+            """
+            if reuse["detached"]:
+                return
+            reuse["detached"] = True
+            try:
+                fd = os.open("/proc/1/fd/1", os.O_WRONLY)
+            except OSError:
+                fd = os.open(os.devnull, os.O_WRONLY)
+            sys.stdout.flush(); sys.stderr.flush()
+            os.dup2(fd, 1); os.dup2(fd, 2); os.close(fd)
+
+        async def stop_current_camera():
+            """closeLive (1004) for the current camera; the WebRTC session stays up."""
+            channel = chans.get("WebrtcDataChannel")
+            if channel is None or channel.readyState != "open":
+                return False
+            close_ack.clear()
+            state["close_sent"] = True
+            try:
+                oracle.push_send(1, build_cmd(USER_ID, 1004, {}))
+                log("-> closeLive (1004) [session kept for reuse]")
+                try:
+                    await asyncio.wait_for(close_ack.wait(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    log("closeLive acknowledgement timed out")
+            finally:
+                state["close_sent"] = False
+            return True
+
+        async def idle_expire():
+            await asyncio.sleep(REUSE_SECONDS)
+            if reuse["parked"] and not state["shutting_down"]:
+                log(f"SESSION reuse window ({REUSE_SECONDS}s) ended; closing the NVR session")
+                await ws.close()
+
+        async def park(reason):
+            async with reuse["lock"]:
+                if (state["shutting_down"] or state["fatal_reason"] or reuse["parked"]
+                        or not state["started"] or not video_ready.is_set()):
+                    return False
+                detach_from_supervisor()
+                reuse["client"] = None
+                if not await stop_current_camera():
+                    # Detached but unable to park: end the session ourselves.
+                    log("SESSION could not be parked; closing the NVR session")
+                    asyncio.ensure_future(ws.close())
+                    return False
+                proc, io["ffmpeg"] = io["ffmpeg"], None
+                io["sink"], io["gate"] = dumpf, new_gate()
+                video_ready.clear()
+                await close_sink(proc)
+                if reuse["server"] is None:
+                    try:
+                        os.unlink(SESSION_SOCKET)
+                    except FileNotFoundError:
+                        pass
+                    reuse["server"] = await asyncio.start_unix_server(handle_take, path=SESSION_SOCKET)
+                reuse["parked"] = True
+                reuse["idle"] = asyncio.create_task(idle_expire())
+                log(f"SESSION parked ({reason}); reusable for {REUSE_SECONDS}s")
+                return True
+
+        async def reply(writer, obj):
+            try:
+                writer.write((json.dumps(obj) + "\n").encode())
+                await writer.drain()
+            except Exception:
+                pass
+
+        async def watch_stall(writer):
+            while reuse["client"] is writer and not state["shutting_down"]:
+                before = state["vframes"]
+                await asyncio.sleep(REUSE_STALL_TIMEOUT)
+                if reuse["client"] is writer and state["vframes"] == before:
+                    state["fatal_reason"] = "video stalled on a reused session"
+                    log("SESSION video stalled; closing the NVR session")
+                    await ws.close()
+                    return
+
+        async def handle_take(reader, writer):
+            global CHANNELS, GROUP, SENSOR, RTSP_URL, STREAM_SENSORS
+            nonlocal ffmpeg_watchdog_task
+            try:
+                request = json.loads(await asyncio.wait_for(reader.readline(), timeout=3))
+                argv = ["eufy_stream.py"] + [str(a) for a in request["argv"]]
+            except Exception:
+                writer.close()
+                return
+            async with reuse["lock"]:
+                if not reuse["parked"] or state["shutting_down"] or state["fatal_reason"]:
+                    await reply(writer, {"ok": False, "reason": "busy"})
+                    writer.close()
+                    return
+                try:
+                    channels, group = parse_selection(argv)
+                    sensor = parse_sensor(argv)
+                    rtsp_url = parse_rtsp(argv)
+                    if not rtsp_url:
+                        raise SystemExit("--rtsp is required")
+                except (SystemExit, ValueError) as error:
+                    await reply(writer, {"ok": False, "reason": str(error)[:120]})
+                    writer.close()
+                    return
+                reuse["parked"] = False
+                if reuse["idle"] is not None:
+                    reuse["idle"].cancel()
+                CHANNELS, GROUP, SENSOR, RTSP_URL = channels, group, sensor, rtsp_url
+                STREAM_SENSORS = stream_sensor_map(channels, sensor)
+                reuse["client"] = writer
+                video_ready.clear()
+                took_at = time.monotonic()
+                await open_sink()
+                if io["ffmpeg"] is not None:
+                    ffmpeg_watchdog_task = asyncio.create_task(ffmpeg_watchdog(io["ffmpeg"]))
+                log(f"SESSION reused for channels {CHANNELS}")
+                await start_sequence()
+            try:
+                await asyncio.wait_for(video_ready.wait(), timeout=REUSE_FIRST_VIDEO_TIMEOUT)
+            except asyncio.TimeoutError:
+                state["fatal_reason"] = "no video after a reused-session camera switch"
+                log("SESSION switch produced no video; closing the NVR session")
+                await reply(writer, {"ok": False, "reason": "no video"})
+                writer.close()
+                await ws.close()
+                return
+            log(f"PERF reuse_first_video_ms={int((time.monotonic() - took_at) * 1000)}")
+            await reply(writer, {"ok": True})
+            stall = asyncio.create_task(watch_stall(writer))
+            try:
+                await reader.read()          # the supervisor holds the socket while viewed
+            except Exception:
+                pass
+            stall.cancel()
+            if reuse["client"] is writer and not state["shutting_down"]:
+                if not await park("viewer left"):
+                    await ws.close()
+            writer.close()
+
+        if reuse_enabled:
+            asyncio.get_running_loop().add_signal_handler(
+                signal.SIGUSR1, lambda: asyncio.ensure_future(park("supervisor handoff")))
 
         async def add_cand(cand):
             try:
@@ -842,18 +1058,11 @@ async def main():
             await oracle.proc.wait()
         except ProcessLookupError:
             pass
-    if ffmpeg_proc:
+    await close_sink(io["ffmpeg"])
+    if REUSE_SECONDS:
         try:
-            if ffmpeg_proc.stdin:
-                ffmpeg_proc.stdin.close()
-            if ffmpeg_proc.returncode is None:
-                ffmpeg_proc.terminate()
-                try:
-                    await asyncio.wait_for(ffmpeg_proc.wait(), timeout=3)
-                except asyncio.TimeoutError:
-                    ffmpeg_proc.kill()
-                    await ffmpeg_proc.wait()
-        except ProcessLookupError:
+            os.unlink(SESSION_SOCKET)
+        except OSError:
             pass
     log(f"DONE. video frames={state['vframes']} bytes={state['vbytes']} ptcs_in={state['ptcs_in']} "
         f"frames_seen={state['frames_seen']}")

@@ -38,6 +38,11 @@ cloud; the video itself is pulled LAN-direct from the NVR.
      integration; use a password of at least 16 characters
    - `adaptive_warm_seconds` -> retain only the last-viewed camera for this many seconds after it closes
      (default `30`; a different camera preempts it; set `0` to disable)
+   - *(optional)* `session_reuse_seconds` -> after a camera closes, keep the NVR connection open for
+     this many seconds; a camera opened in that window switches inside it (closeLive + startStream,
+     as the official web viewer does) in about 0.2-1 s instead of a new 3-4 s handshake. `0`
+     (default) disables it. While the connection is open no other add-on session can start, but the
+     eufy app keeps working.
    - *(optional)* `disabled_channels` -> comma-separated channel numbers such as `0,2` to omit
      cameras that cannot stream from go2rtc and snapshot priming. Discovery still records them.
    - *(optional)* `stream_sensors` -> comma-separated `channel:sensor` pairs such as `0:0,2:0` that set the

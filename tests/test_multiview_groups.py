@@ -83,7 +83,7 @@ def test_startstream_uses_web_multiview_request():
     assert '"stitch_mode": 3' in stream
     assert '"station_video_type": 6' in stream
     # An explicit --sensor (extra lens stream) overrides the per-camera sensor map.
-    assert "STREAM_SENSORS = {c: SENSOR for c in CHANNELS}" in stream
+    assert "return {c: sensor for c in channels}" in stream
     assert "crop=iw*{cols}/3:ih*{rows}/3:0:0" in stream
 
 

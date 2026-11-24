@@ -99,4 +99,4 @@ def test_duplicate_can_be_disabled():
 def test_bridge_uses_the_gate():
     stream = (ROOT / "bridge/eufy_stream.py").read_text()
     assert "import keyframe_gate" in stream
-    assert "start_gate.push(nal, keyframe_gate.frame_size(payload[:22]))" in stream
+    assert "io[\"gate\"].push(nal, keyframe_gate.frame_size(payload[:22]))" in stream
