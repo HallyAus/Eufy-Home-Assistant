@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.7.18-rc.2
+
+This test candidate packages the merged bridge at b3ee602a. Device validation of
+this exact candidate is still needed. Queued streams may still exceed Home
+Assistant's timeout; camera switching is not confirmed fixed.
 
 - Choose the startStream `sensor` per camera instead of always sending sensor 1. Single-lens PoE Cam E40 (T8P00) cameras only deliver video on sensor 0 and now use it automatically; other models keep sensor 1. A new optional `stream_sensors` setting (`channel:sensor` pairs) overrides any channel.
 - Finish live-session teardown (closeLive, then peer close) even when ffmpeg's exit and go2rtc's SIGINT

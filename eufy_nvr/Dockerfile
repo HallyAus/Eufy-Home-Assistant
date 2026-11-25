@@ -58,15 +58,18 @@ RUN if [ ! -e /usr/bin/python ]; then ln -s /usr/bin/python3 /usr/bin/python; fi
 # Pin the runtime bridge to the reviewed implementation commit. The add-on folder is
 # Docker's build context, so the repository root cannot be copied directly.
 ARG REPO_URL="https://github.com/HallyAus/Eufy-Home-Assistant"
-ARG REPO_COMMIT="2d34ded6425779853a91baf8ae8b5861647e5dea"
+ARG REPO_COMMIT="b3ee602a359529d59a41a11b7d160be7219d385a"
 RUN [[ "${REPO_COMMIT}" =~ ^[0-9a-f]{40}$ ]] \
     && git init --quiet /tmp/repo \
     && git -C /tmp/repo remote add origin "${REPO_URL}" \
     && git -C /tmp/repo fetch --quiet --depth 1 origin "${REPO_COMMIT}" \
     && git -C /tmp/repo checkout --quiet --detach FETCH_HEAD \
     && test "$(git -C /tmp/repo rev-parse HEAD)" = "${REPO_COMMIT}" \
-    && mkdir -p /opt/eufy \
+    && mkdir -p /opt/eufy/build-info \
     && cp -r /tmp/repo/bridge /opt/eufy/bridge \
+    && git -C /tmp/repo rev-parse HEAD > /opt/eufy/build-info/bridge-revision.txt \
+    && node --version > /opt/eufy/build-info/node-version.txt \
+    && (cd /opt/eufy && find bridge -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > build-info/bridge.sha256) \
     && rm -rf /tmp/repo
 
 WORKDIR /opt/eufy/bridge

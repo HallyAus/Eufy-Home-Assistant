@@ -21,7 +21,6 @@ jobs:
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
       - name: Install test dependencies
         run: |
           python -m pip install -r bridge/requirements.txt \
@@ -53,3 +52,8 @@ jobs:
             --file eufy_nvr/Dockerfile \
             eufy_nvr
           test "$(docker run --rm --entrypoint node eufy-nvr:ci --version)" = "v22.23.4"
+          test "$(docker run --rm --entrypoint cat eufy-nvr:ci /opt/eufy/build-info/node-version.txt)" = "v22.23.4"
+          test "$(docker run --rm --entrypoint cat eufy-nvr:ci /opt/eufy/build-info/bridge-revision.txt)" = "b3ee602a359529d59a41a11b7d160be7219d385a"
+          docker run --rm --workdir /opt/eufy --entrypoint sha256sum eufy-nvr:ci -c build-info/bridge.sha256
+          diff -u <(find bridge -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) \
+            <(docker run --rm --entrypoint cat eufy-nvr:ci /opt/eufy/build-info/bridge.sha256)
