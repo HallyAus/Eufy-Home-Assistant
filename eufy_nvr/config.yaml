@@ -67,8 +67,12 @@ options:
   log_level: "info"
   keep_warm: false
   adaptive_warm_seconds: 30
+  session_reuse_seconds: 0
+  audio: false
   token_refresh_hours: 6
   video_copy: false
+  extra_lenses: ""
+  camera_groups: ""
   disabled_channels: ""
   stream_sensors: ""
   ice_allow: ""
@@ -89,11 +93,23 @@ schema:
   # adaptive_warm_seconds: retain the most recently viewed camera after its last consumer so
   #   reopening is instant. A different camera preempts it. Set 0 to disable; maximum 600.
   adaptive_warm_seconds: int(0,600)?
+  # session_reuse_seconds: after a viewer leaves, keep the NVR connection open this long and
+  #   switch the next camera inside it (as eufy's web viewer does, ~0.2-1 s instead of a new
+  #   3-4 s handshake). 0 (default) disables it; maximum 300.
+  session_reuse_seconds: int(0,300)?
+  # audio: carry each camera's microphone (Opus) on single-camera streams. Experimental.
+  audio: bool?
   # token_refresh_hours: how often to re-login and refresh auth.json (the eufy token is ~1-day).
   token_refresh_hours: int(0,)?
   # video_copy: publish raw H.265 instead of transcoding to H.264 (lower CPU, but the browser live
   #   view shows the still thumbnail only). The adaptive warmer itself never adds a transcode.
   video_copy: bool?
+  # extra_lenses: extra per-lens streams for dual-lens cameras, as channel:sensor pairs
+  #   (for example 0:0,1:0 adds the fixed lens of S4 Max PoE cameras on channels 0 and 1).
+  extra_lenses: str?
+  # camera_groups: NVR-side multi-view streams that show several cameras live in one video.
+  #   Format name=slot-channel-sensor,...;name2=... (slots 0-8 on a 3x3 grid, row-major).
+  camera_groups: str?
   # Optional comma-separated camera channel numbers (for example 0,2) to omit from go2rtc
   # and snapshot priming when those cameras cannot stream. Discovery still finds them.
   disabled_channels: str?
