@@ -43,6 +43,9 @@ cloud; the video itself is pulled LAN-direct from the NVR.
      as the official web viewer does) in about 0.2-1 s instead of a new 3-4 s handshake. `0`
      (default) disables it. While the connection is open no other add-on session can start, but the
      eufy app keeps working.
+   - *(optional)* `audio` -> carry each camera's microphone on single-camera streams. The NVR sends
+     AAC-LC (16 kHz, mono); the add-on publishes it as Opus, which WebRTC and HomeKit play directly.
+     Multi-camera groups stay silent. Off by default; off leaves the stream exactly as before.
    - *(optional)* `disabled_channels` -> comma-separated channel numbers such as `0,2` to omit
      cameras that cannot stream from go2rtc and snapshot priming. Discovery still records them.
    - *(optional)* `stream_sensors` -> comma-separated `channel:sensor` pairs such as `0:0,2:0` that set the

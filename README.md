@@ -133,6 +133,8 @@ Runs everything on your HA host; no always-on PC and no token paste.
      another camera preempts it immediately; set `0` to disable)
    - *(optional)* `session_reuse_seconds` — after a camera closes, keep the NVR connection open this long
      and switch the next camera inside it (about 0.2-1 s instead of 3-4 s); `0` (default) disables it
+   - *(optional)* `audio` — carry each camera's microphone on single-camera streams (Opus, for WebRTC and
+     HomeKit). Multi-camera groups stay silent. Off by default.
    - *(optional)* `disabled_channels` — comma-separated channel numbers such as `0,2` to omit cameras
      that cannot stream from go2rtc and snapshot priming; discovery still records them. Restart after changing it.
    - *(optional)* `stream_sensors` — comma-separated `channel:sensor` pairs such as `0:0,2:0` for the startStream
@@ -284,7 +286,8 @@ and reproducible version-pinned add-on builds. It also includes region-aware sig
 - [x] **Companion HACS integration** — auto-creates the camera entities from go2rtc (zero manual entry).
 - [~] **HA add-on container** — bundles Python+Node+ffmpeg+go2rtc and runs on HAOS (shipped; the engine/login are
       validated — pending broad on-HAOS build testing across architectures).
-- [ ] Audio (`1301`) / two-way talk; auto-reconnect hardening; per-camera quality (`streamtype`).
+- [x] Live audio (`1301`, `audio` option)
+- [ ] Two-way talk; auto-reconnect hardening; per-camera quality (`streamtype`).
 
 ## Notes / limits
 

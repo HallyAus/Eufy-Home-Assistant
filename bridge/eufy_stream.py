@@ -215,9 +215,8 @@ VIDEO_DUMP = os.path.join(ROOT, "_debug", "video_dump.bin")
 FRAMES_LOG = os.path.join(ROOT, "_debug", "frames.jsonl")
 CAPTURE_DEBUG = os.environ.get("EUFY_CAPTURE_DEBUG") == "1"
 # Audio (experimental). EUFY_AUDIO_CHN: -1 = no audio (default), "auto" = the first
-# streamed channel, or an explicit channel number. EUFY_AUDIO_PROBE=1 logs what arrives.
+# streamed channel, or an explicit channel number.
 AUDIO_CHN_SETTING = os.environ.get("EUFY_AUDIO_CHN", "-1").strip() or "-1"
-AUDIO_PROBE = os.environ.get("EUFY_AUDIO_PROBE") == "1"
 
 
 AUDIO_ENABLED = AUDIO_CHN_SETTING != "-1"
@@ -631,19 +630,6 @@ async def main():
         xz = buf[:4] == b"XZYH"
         cmdid = (buf[4] | (buf[5] << 8)) if (xz and len(buf) >= 6) else -1
         payload = buf[16:] if xz else buf
-        if AUDIO_PROBE:
-            probe = state.setdefault("probe", {"n": 0, "by_cmd": {}, "nonvid": 0, "t": time.monotonic()})
-            probe["n"] += 1
-            probe["by_cmd"][cmdid] = probe["by_cmd"].get(cmdid, 0) + 1
-            annexb = payload[22:25] == b"\x00\x00\x01" or payload[22:26] == b"\x00\x00\x00\x01"
-            if not annexb:
-                probe["nonvid"] += 1
-            if probe["n"] <= 12 or (not annexb and probe["nonvid"] <= 25):
-                log(f"PROBE frame n={probe['n']} cmd={cmdid} len={len(buf)} ch={buf[12] if len(buf) > 12 else -1} "
-                    f"annexb={int(annexb)} xz={buf[:16].hex()} hdr={payload[:22].hex()} data={payload[22:54].hex()}")
-            if time.monotonic() - probe["t"] >= 5.0:
-                probe["t"] = time.monotonic()
-                log(f"PROBE summary frames={probe['n']} by_cmd={probe['by_cmd']} non_video={probe['nonvid']}")
         if AUDIO_ENABLED and cmdid in (1300, 1301, 1303) and not (payload[22:25] == b"\x00\x00\x01" or payload[22:26] == b"\x00\x00\x00\x01"):
             # Audio: [16-byte media header][ADTS AAC frame]. Never goes into the video pipe.
             state["audio_frames"] = state.get("audio_frames", 0) + 1
