@@ -49,6 +49,24 @@ class ReleasePackagingTest(unittest.TestCase):
         self.assertNotIn('REPO_REF="main"', dockerfile)
         self.assertNotIn("releases/latest", dockerfile)
 
+    def test_ci_verifies_pinned_and_checkout_bridge_images(self):
+        dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+
+        self.assertIn('LABEL org.opencontainers.image.revision="${REPO_COMMIT}"', dockerfile)
+        self.assertIn("bridge-source: [pinned, checkout]", workflow)
+        self.assertIn("architecture: [amd64, arm64]", workflow)
+        self.assertIn("runner: ubuntu-24.04-arm", workflow)
+        self.assertIn("{{ .Architecture }}", workflow)
+        self.assertIn('"$EXPECTED_ARCH"', workflow)
+        self.assertIn('expected="$(git rev-parse HEAD)"', workflow)
+        self.assertIn('test "$expected" = "$GITHUB_SHA"', workflow)
+        self.assertIn('--build-arg "REPO_COMMIT=$expected"', workflow)
+        self.assertIn('docker build "${build_args[@]}"', workflow)
+        self.assertIn("docker image inspect", workflow)
+        self.assertIn("git ls-files -z -- bridge/", workflow)
+        self.assertIn("sha256sum eufy-nvr:ci --check --strict", workflow)
+
     def test_addon_uses_patched_node_runtime(self):
         dockerfile = (ROOT / "eufy_nvr/Dockerfile").read_text()
         self.assertIn("FROM node:22.23.4-bookworm-slim AS patched-node", dockerfile)
