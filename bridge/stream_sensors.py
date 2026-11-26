@@ -2,7 +2,7 @@
 
 The NVR's ``chn_list`` entry carries a ``sensor`` index. Dual-lens cameras such
 as the T8214 doorbell stream on sensor 1, which the bridge has always sent, but
-single-lens PoE Cam E40 (T8P00) cameras only deliver video on sensor 0: with
+single-lens PoE Cam E40 (T8P00) and T8P10 cameras only deliver video on sensor 0: with
 sensor 1 the session opens and startStream is acknowledged, but no video frame
 ever arrives.
 
@@ -22,7 +22,10 @@ from typing import Any
 
 DEFAULT_SENSOR = 1
 # Serial prefixes of cameras confirmed on hardware to stream only on sensor 0.
-SINGLE_SENSOR_SERIAL_PREFIXES: tuple[str, ...] = ("T8P00",)  # PoE Cam E40
+SINGLE_SENSOR_SERIAL_PREFIXES: tuple[str, ...] = (
+    "T8P00",  # PoE Cam E40
+    "T8P10",  # PoE turret, confirmed in #50
+)
 
 
 def parse_stream_sensors(value: str | None) -> dict[int, int]:
