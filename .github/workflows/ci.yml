@@ -42,17 +42,24 @@ jobs:
 
   addon-build:
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         bridge-source: [pinned, checkout]
+        architecture: [amd64, arm64]
+        include:
+          - architecture: amd64
+            runner: ubuntu-latest
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
     env:
       BRIDGE_SOURCE: ${{ matrix.bridge-source }}
+      EXPECTED_ARCH: ${{ matrix.architecture }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Build and verify amd64 Home Assistant add-on image
+      - name: Build and verify Home Assistant add-on image
         shell: bash
         run: |
           dockerfile=eufy_nvr/Dockerfile
@@ -66,6 +73,7 @@ jobs:
           fi
           [[ "$expected" =~ ^[0-9a-f]{40}$ ]]
           docker build "${build_args[@]}" --tag eufy-nvr:ci --file "$dockerfile" eufy_nvr
+          test "$(docker image inspect --format '{{ .Architecture }}' eufy-nvr:ci)" = "$EXPECTED_ARCH"
           test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' eufy-nvr:ci)" = "$expected"
           test "$(docker run --rm --entrypoint node eufy-nvr:ci --version)" = "v22.23.4"
           if [[ "$BRIDGE_SOURCE" == checkout ]]; then

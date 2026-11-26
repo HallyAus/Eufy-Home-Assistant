@@ -55,6 +55,10 @@ class ReleasePackagingTest(unittest.TestCase):
 
         self.assertIn('LABEL org.opencontainers.image.revision="${REPO_COMMIT}"', dockerfile)
         self.assertIn("bridge-source: [pinned, checkout]", workflow)
+        self.assertIn("architecture: [amd64, arm64]", workflow)
+        self.assertIn("runner: ubuntu-24.04-arm", workflow)
+        self.assertIn("{{ .Architecture }}", workflow)
+        self.assertIn('"$EXPECTED_ARCH"', workflow)
         self.assertIn('expected="$(git rev-parse HEAD)"', workflow)
         self.assertIn('test "$expected" = "$GITHUB_SHA"', workflow)
         self.assertIn('--build-arg "REPO_COMMIT=$expected"', workflow)
