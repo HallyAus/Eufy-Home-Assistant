@@ -14,6 +14,7 @@ All child stderr is relayed unchanged so existing diagnostics remain useful.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import signal
 import sys
@@ -50,6 +51,13 @@ SESSION_RELEASE_DELAY = max(
 TURN_PENDING_TIMEOUT = max(2.0, min(float(os.environ.get("EUFY_TURN_PENDING_TIMEOUT", "4")), 60.0))
 BUSY_RETRIES = max(0, min(int(os.environ.get("EUFY_BUSY_RETRIES", "1")), 3))
 BUSY_RETRY_DELAY = max(0.5, min(float(os.environ.get("EUFY_BUSY_RETRY_DELAY", "4.0")), 15.0))
+# Session reuse (see eufy_stream.py): a parked engine keeps the NVR session open
+# for this many seconds after its viewer leaves and serves the next camera.
+REUSE_SECONDS = max(0, min(int(os.environ.get("EUFY_SESSION_REUSE_SECONDS", "0") or 0), 300))
+SESSION_SOCKET = os.environ.get("EUFY_SESSION_SOCKET", "/tmp/eufy_nvr_session.sock")
+HANDOFF_POLL = 0.5
+HANDOFF_REPLY_TIMEOUT = 12.0
+PARK_TIMEOUT = 4.0
 
 
 @dataclass
@@ -155,7 +163,12 @@ class SessionGate:
             tickets.append(ticket)
         return tickets
 
-    async def acquire(self, stop_event: asyncio.Event) -> bool:
+    async def acquire(self, stop_event: asyncio.Event, alternative=None):
+        """Wait for the session lock (returns True) or until stopped (False).
+
+        ``alternative`` is polled while waiting; a truthy result (for example a
+        reused NVR session) is returned instead of the lock.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.handle = self.path.open("a+b")
         if os.name == "nt":
@@ -176,7 +189,13 @@ class SessionGate:
         try:
             self.queue_dir.mkdir(parents=True, exist_ok=True)
             ticket.write_text(self.label)
+            last_alternative_at = 0.0
             while not stop_event.is_set():
+                if alternative is not None and time.monotonic() - last_alternative_at >= HANDOFF_POLL:
+                    last_alternative_at = time.monotonic()
+                    result = await alternative()
+                    if result:
+                        return result
                 queue = self._queue()
                 if not queue or queue[0] == ticket:
                     try:
@@ -223,6 +242,19 @@ class SessionGate:
             # The gate still guarantees safety if the optional latency hint
             # cannot be written; the waiting producer remains bounded.
             pass
+
+    def detach(self) -> None:
+        """Close our handle without unlocking: a parked engine holds the lock.
+
+        The engine inherited the same open file description, so the flock stays
+        held until that engine exits.
+        """
+        if self.handle is not None:
+            self.handle.close()
+            self.handle = None
+
+    def fileno(self) -> int | None:
+        return self.handle.fileno() if self.handle is not None else None
 
     def release(self) -> None:
         if self.handle is None:
@@ -298,12 +330,29 @@ async def _relay_stderr(
         inspect_log_line(line, state, discovery)
 
 
+async def _park(proc: asyncio.subprocess.Process, relay: asyncio.Task) -> bool:
+    """Ask the engine to keep its NVR session for reuse; True once it has detached."""
+    try:
+        os.kill(proc.pid, signal.SIGUSR1)
+    except ProcessLookupError:
+        return False
+    # The engine closes its end of our stderr pipe when it detaches.
+    try:
+        await asyncio.wait_for(asyncio.shield(relay), timeout=PARK_TIMEOUT)
+    except asyncio.TimeoutError:
+        return False
+    return proc.returncode is None
+
+
 async def run_attempt(
     engine_args: list[str], discovery: bool,
     stop_event: asyncio.Event | None = None,
+    lock_fd: int | None = None,
 ) -> tuple[int, str, SessionState]:
     now = time.monotonic()
     state = SessionState(started_at=now, last_progress=now)
+    # A reusable engine inherits the session lock so it stays held while parked.
+    reusable = bool(REUSE_SECONDS and lock_fd is not None and not discovery and os.name != "nt")
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         str(ENGINE),
@@ -312,9 +361,11 @@ async def run_attempt(
         stdout=None,
         stderr=asyncio.subprocess.PIPE,
         start_new_session=(os.name != "nt"),
+        pass_fds=(lock_fd,) if reusable else (),
     )
     relay = asyncio.create_task(_relay_stderr(proc, state, discovery))
     reason = "exit"
+    parked = False
     try:
         while proc.returncode is None:
             try:
@@ -325,6 +376,10 @@ async def run_attempt(
             now = time.monotonic()
             if stop_event is not None and stop_event.is_set():
                 reason = "shutdown"
+                if reusable and state.first_video_at is not None and await _park(proc, relay):
+                    print("eufy supervisor: NVR session parked for reuse", file=sys.stderr, flush=True)
+                    parked = True
+                    return 0, "parked", state
                 await _terminate_tree(proc)
                 break
             if state.authorization_rejection:
@@ -365,12 +420,58 @@ async def run_attempt(
     finally:
         # Covers cancellation and a leader that exits before its process-group
         # descendants. Shield cleanup so a second cancellation cannot strand them.
-        await asyncio.shield(_terminate_tree(proc))
-        try:
-            await asyncio.shield(asyncio.wait_for(relay, timeout=2))
-        except asyncio.TimeoutError:
-            relay.cancel()
+        # A parked engine is deliberately left running for the next camera.
+        if not parked:
+            await asyncio.shield(_terminate_tree(proc))
+            try:
+                await asyncio.shield(asyncio.wait_for(relay, timeout=2))
+            except asyncio.TimeoutError:
+                relay.cancel()
     return rc, reason, state
+
+
+@dataclass
+class Handoff:
+    reader: asyncio.StreamReader
+    writer: asyncio.StreamWriter
+
+
+async def try_handoff(engine_args: list[str]) -> Handoff | None:
+    """Give this camera to a parked engine's open NVR session, if there is one."""
+    if not REUSE_SECONDS or os.name == "nt":
+        return None
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_unix_connection(SESSION_SOCKET), timeout=0.5)
+    except (OSError, asyncio.TimeoutError):
+        return None
+    try:
+        writer.write((json.dumps({"argv": engine_args}) + "\n").encode())
+        await writer.drain()
+        line = await asyncio.wait_for(reader.readline(), timeout=HANDOFF_REPLY_TIMEOUT)
+        reply = json.loads(line or b"{}")
+    except (OSError, ValueError, asyncio.TimeoutError):
+        writer.close()
+        return None
+    if reply.get("ok"):
+        return Handoff(reader, writer)
+    if reply.get("reason") not in (None, "busy"):
+        print(f"eufy supervisor: reused session declined ({reply.get('reason')})",
+              file=sys.stderr, flush=True)
+    writer.close()
+    return None
+
+
+async def run_handoff(handoff: Handoff, stop_event: asyncio.Event) -> str:
+    """Hold the reused session until our viewer leaves ("shutdown") or it ends ("lost")."""
+    print("eufy supervisor: camera switched inside the open NVR session", file=sys.stderr, flush=True)
+    ended = asyncio.create_task(handoff.reader.read())
+    stopped = asyncio.create_task(stop_event.wait())
+    done, pending = await asyncio.wait({ended, stopped}, return_when=asyncio.FIRST_COMPLETED)
+    for task in pending:
+        task.cancel()
+    handoff.writer.close()   # the engine parks again when we let go
+    return "shutdown" if stopped in done else "lost"
 
 
 async def main(argv: list[str] | None = None) -> int:
@@ -408,10 +509,21 @@ async def main(argv: list[str] | None = None) -> int:
             except asyncio.TimeoutError:
                 pass
 
-        if not await gate.acquire(stop_event):
+        alternative = None if discovery else (lambda: try_handoff(args))
+        got = await gate.acquire(stop_event, alternative=alternative)
+        if not got:
             return 0
+        if isinstance(got, Handoff):
+            if await run_handoff(got, stop_event) == "shutdown":
+                return 0
+            print("eufy supervisor: reused NVR session ended; starting a new one",
+                  file=sys.stderr, flush=True)
+            continue
         try:
-            rc, reason, state = await run_attempt(args, discovery, stop_event)
+            rc, reason, state = await run_attempt(args, discovery, stop_event, gate.fileno())
+            if reason == "parked":
+                gate.detach()          # the engine keeps the lock while parked
+                return 0
         finally:
             # go2rtc has already removed the last consumer when the engine exits,
             # but the appliance needs a brief beat to retire its WebRTC session.
@@ -419,7 +531,7 @@ async def main(argv: list[str] | None = None) -> int:
             # racing the NVR's internal teardown and receiving status 486. This
             # delay is required when go2rtc sets the stop event for a normal
             # camera handoff, not only when the engine exits on its own.
-            if SESSION_RELEASE_DELAY:
+            if SESSION_RELEASE_DELAY and gate.fileno() is not None:
                 await asyncio.sleep(SESSION_RELEASE_DELAY)
             gate.release()
 

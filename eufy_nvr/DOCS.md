@@ -38,6 +38,11 @@ cloud; the video itself is pulled LAN-direct from the NVR.
      integration; use a password of at least 16 characters
    - `adaptive_warm_seconds` -> retain only the last-viewed camera for this many seconds after it closes
      (default `30`; a different camera preempts it; set `0` to disable)
+   - *(optional)* `session_reuse_seconds` -> after a camera closes, keep the NVR connection open for
+     this many seconds; a camera opened in that window switches inside it (closeLive + startStream,
+     as the official web viewer does) in about 0.2-1 s instead of a new 3-4 s handshake. `0`
+     (default) disables it. While the connection is open no other add-on session can start, but the
+     eufy app keeps working.
    - *(optional)* `disabled_channels` -> comma-separated channel numbers such as `0,2` to omit
      cameras that cannot stream from go2rtc and snapshot priming. Discovery still records them.
    - *(optional)* `stream_sensors` -> comma-separated `channel:sensor` pairs such as `0:0,2:0` that set the
@@ -47,6 +52,16 @@ cloud; the video itself is pulled LAN-direct from the NVR.
      WebRTC candidates offered to the NVR. Hosts with Docker, VPN (for example Tailscale) or IPv6
      interfaces otherwise offer unreachable candidates and the first connection attempt can stall in ICE
      "checking". Falls back to every candidate if none match.
+   - *(optional)* `extra_lenses` -> extra streams for the second lens of dual-lens cameras, as
+     `channel:sensor` pairs. On S4 Max PoE cameras sensor `1` (the default stream) is the PTZ lens and
+     sensor `0` the fixed wide lens, so `0:0,1:0` adds the fixed lens for channels 0 and 1 as
+     `<camera>_lens0` streams.
+   - *(optional)* `camera_groups` -> show several cameras live at once. The NVR composites them into one
+     video (the same multi-view the official web viewer uses), so a group uses the single live session
+     like one camera. Format: `name=slot-channel-sensor,...` with `;` between groups, for example
+     `front=0-0-1,1-1-1,3-0-0,4-1-0`. Slots `0`-`8` are a 3x3 grid read left to right, top to bottom; the
+     stream is cropped to the rows and columns in use (with transcoding on). Each tile is about 640x360.
+     Each group appears as `eufy_group_<name>`.
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial.
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged with a graphic
      captcha (the log prints the `captcha_id`; solve it and set both, then restart).

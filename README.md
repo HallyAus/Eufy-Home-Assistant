@@ -131,6 +131,8 @@ Runs everything on your HA host; no always-on PC and no token paste.
      protect the camera API, web UI, and RTSP streams; enter the same values in the companion integration
    - `adaptive_warm_seconds` — how long to retain the last-viewed camera after it closes (default `30`;
      another camera preempts it immediately; set `0` to disable)
+   - *(optional)* `session_reuse_seconds` — after a camera closes, keep the NVR connection open this long
+     and switch the next camera inside it (about 0.2-1 s instead of 3-4 s); `0` (default) disables it
    - *(optional)* `disabled_channels` — comma-separated channel numbers such as `0,2` to omit cameras
      that cannot stream from go2rtc and snapshot priming; discovery still records them. Restart after changing it.
    - *(optional)* `stream_sensors` — comma-separated `channel:sensor` pairs such as `0:0,2:0` for the startStream
@@ -138,6 +140,10 @@ Runs everything on your HA host; no always-on PC and no token paste.
      for a camera that connects but never receives video. Restart after changing it.
    - *(optional)* `ice_allow` — comma-separated IPv4 prefixes such as `192.168.1.` (your LAN) to offer the NVR
      only LAN WebRTC candidates; helps hosts with Docker/VPN/IPv6 interfaces whose first connection stalls in ICE "checking"
+   - *(optional)* `extra_lenses` — `channel:sensor` pairs that add the second lens of dual-lens cameras
+     (S4 Max PoE: `0` is the fixed lens, `1` the default PTZ lens), for example `0:0,1:0`
+   - *(optional)* `camera_groups` — several cameras live in one stream, composited by the NVR, for example
+     `front=0-0-1,1-1-1;back=0-2-1,1-3-1` (`slot-channel-sensor`, slots `0`-`8` on a 3x3 grid)
    - *(optional)* `station_sn` — only if auto-discovery can't find your NVR's serial
    - *(optional)* `captcha_id` + `captcha_answer` — only if a login is challenged (the log prints the `captcha_id`)
    - *(optional)* `verification_code` — when the log says mailbox verification is required, enter the
