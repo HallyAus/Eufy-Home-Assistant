@@ -233,6 +233,14 @@ the credentials; use port `8556` for the add-on or `8554` for the manual bridge;
 LAN IP** for the add-on, or the bridge IP).
 Or paste the streams into HA's own `/config/go2rtc.yaml` and reference them from a `camera:` / WebRTC card.
 
+If a cold stream stops around 10 seconds in Generic Camera but the bridge logs
+show incoming frames, compare the same RTSP stream in VLC or the go2rtc Web UI
+for 30 seconds without leaving any other viewer open. Try the companion
+integration for live viewing. A first frame before the stop does not prove the
+viewer remained attached. Note first frame, viewer disconnect and producer
+stop times separately. Use a per-channel `stream_sensors` override only if that
+channel connects but returns no frames. Do not change the sensor globally.
+
 ---
 
 ## "I'm not a fan of Frigate" — you don't need it
