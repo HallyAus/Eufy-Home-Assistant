@@ -41,8 +41,8 @@ cloud; the video itself is pulled LAN-direct from the NVR.
    - *(optional)* `disabled_channels` -> comma-separated channel numbers such as `0,2` to omit
      cameras that cannot stream from go2rtc and snapshot priming. Discovery still records them.
    - *(optional)* `stream_sensors` -> comma-separated `channel:sensor` pairs such as `0:0,2:0` that set the
-     startStream sensor index per camera. PoE Cam E40 (T8P00) uses sensor 0 automatically and other cameras
-     keep sensor 1; try `channel:0` for a camera whose session opens but never receives video.
+     startStream sensor index per camera. PoE Cam E40 (T8P00) and T8P10 use sensor 0 automatically and other
+     cameras keep sensor 1; try `channel:0` for a camera whose session opens but never receives video.
    - *(optional)* `ice_allow` -> comma-separated IPv4 prefixes such as `192.168.1.` (your LAN) for the
      WebRTC candidates offered to the NVR. Hosts with Docker, VPN (for example Tailscale) or IPv6
      interfaces otherwise offer unreachable candidates and the first connection attempt can stall in ICE

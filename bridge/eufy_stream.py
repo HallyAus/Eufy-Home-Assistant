@@ -168,7 +168,7 @@ CAPTURE_DEBUG = os.environ.get("EUFY_CAPTURE_DEBUG") == "1"
 # discovered camera list survives a container restart/rebuild and gen_go2rtc.py
 # reads it from the exact same place; default to the bridge dir for standalone runs.
 CAMERAS_JSON = os.environ.get("EUFY_CAMERAS", os.path.join(ROOT, "cameras.json"))
-# Per-camera startStream sensor: single-lens PoE Cam E40 (T8P00) only streams on
+# Per-camera startStream sensor: single-lens PoE Cam E40 (T8P00) and T8P10 only stream on
 # sensor 0; EUFY_STREAM_SENSORS ("channel:sensor,...") overrides any channel.
 try:
     _SENSOR_OVERRIDES = stream_sensors.parse_stream_sensors(os.environ.get("EUFY_STREAM_SENSORS", ""))

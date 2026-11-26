@@ -46,6 +46,12 @@ def test_e40_defaults_to_sensor_zero_and_others_keep_sensor_one():
     assert resolved == {0: 0, 1: 0, 2: 1, 4: 1}
 
 
+def test_t8p10_defaults_to_sensor_zero():
+    serials = {1: "T8P10TESTCAM0001", 2: "t8p10testcam0002", 3: "T8E00TESTCAM0003"}
+    resolved = sensors.sensors_for_channels([1, 2, 3], serials, {})
+    assert resolved == {1: 0, 2: 0, 3: 1}
+
+
 def test_unknown_channel_keeps_historical_default():
     assert sensors.sensor_for_channel(7, sensors.serials_by_channel(MANIFEST), {}) == 1
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Use sensor 0 automatically for T8P10 PoE turret cameras too. With sensor 1 they connect but never receive video (#50).
 - Choose the startStream `sensor` per camera instead of always sending sensor 1. Single-lens PoE Cam E40 (T8P00) cameras only deliver video on sensor 0 and now use it automatically; other models keep sensor 1. A new optional `stream_sensors` setting (`channel:sensor` pairs) overrides any channel.
 - Finish live-session teardown (closeLive, then peer close) even when ffmpeg's exit and go2rtc's SIGINT
   cancel the engine twice. An aborted teardown left the NVR holding the call for about 60 seconds and
